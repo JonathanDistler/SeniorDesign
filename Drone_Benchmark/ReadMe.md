@@ -4,7 +4,7 @@ The goal of this project is to create a viable drone benchmark tests that incorp
 
 Although there are drone benchmark tests, as per my literature review, they don't incorporate any reinforcement-learning (RL) based testing, dynamic elements, or compatibility with drone swarms - a growing research feature. 
 
-![Gazebo Simulation](images\model.png)
+![Gazebo Simulation](../images/model.png)
 
 # Basic Assumptions
 
@@ -64,7 +64,7 @@ param set
 *Terminal 2*
 This terminal runs the scripts for each practical test that corresponds to the real world test. The general folder layout is described below:
 
-![drone_obstacle_course folder tree](images\drone_obstacle_course_tree.png)
+![drone_obstacle_course folder tree](../images/drone_obstacle_course_tree.png)
 
 
 Firstly, create a virtual-environment (in this case .venv). After setting up the previous terminal and getting prompted to "takeoff":

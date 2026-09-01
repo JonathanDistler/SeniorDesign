@@ -1,8 +1,26 @@
-*This is a brief overview of my senior design project*
-My name is Jonathan Distler, I'm currently a senior at Cornell University studying mechanical engineering with an emphasis on robotics and simulation. I've been a part of the Dr. Falco's Aerospace Adversary since January 2024. This project is a culmination on all my previous work. It follows two different trajectories.
+## Senior Design Project
 
-*Drone Ballet*
-The first project is the "Drone Ballet" project. The basic premise is that if a drone is hit by a high-energy directed laser, it will likely become defective and unable to achieve its mission goals. However, if it takes more of the laser's time, then it provides means for other drones in a swarm to survive. The big research question is how long can one prolong that exposure before the drone is fully defective and has structural damage? This research proposal outlines a rotation about one of the drones' axes try to dilute the resolution of the oncoming beam. 
+My name is Jonathan Distler, and I am currently a senior at Cornell University studying Mechanical Engineering with an emphasis on robotics and simulation. I have been a member of Dr. Falco's Aerospace Adversary Lab since January 2024. This senior design project is a culmination of my previous work in the lab and consists of two related projects.
 
-*Drone Benchmark*
-The second project involves the benchmarking of drones. From a literature review, there exist drone benchmarks, but none have a dynamic element, and none are catered towards drone swarms. This research question asks, "can one design a readily manufacturable drone test setup and simulation environment to compare drone behaviors for single drone and swarm drone use, while incorporating compute tests via the implementation of aruco tags?"
+### Drone Ballet
+
+The first project is the **"Drone Ballet"** project. The basic premise is that if a drone is hit by a high-energy directed laser, it will likely become defective and unable to achieve its mission goals. However, if the drone can increase the amount of time required for the laser to cause significant damage, it provides additional time for other drones in a swarm to survive.
+
+The primary research question is: **How long can a drone prolong its exposure to a directed laser before becoming fully defective or sustaining structural damage?**
+
+This research proposes a rotational maneuver about one of the drone's axes in an attempt to dilute the resolution of the incoming beam and reduce the amount of energy concentrated on any single area of the drone.
+
+### Drone Benchmark
+
+The second project involves the **benchmarking of drones**. Based on a literature review, existing drone benchmarks are available; however, few incorporate dynamic elements, and none are specifically designed for evaluating drone swarms.
+
+The primary research question is: **Can a readily manufacturable drone test setup and simulation environment be designed to compare drone behaviors in both single-drone and swarm applications, while also incorporating computational performance tests through the use of ArUco tags?**
+
+
+My resume and contact-information can be found below:
+
+Phone: +1 540-553-1573
+
+Email: snoandmo@gmail.com 
+
+[Resume](images\Distler_Resume_26.pdf)
