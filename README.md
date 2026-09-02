@@ -4,7 +4,7 @@ My name is Jonathan Distler, and I am currently a senior at Cornell University s
 
 ### Drone Ballet
 
-The first project is the **"Drone Ballet"** project. The basic premise is that if a drone is hit by a high-energy directed laser, it will likely become defective and unable to achieve its mission goals. However, if the drone can increase the amount of time required for the laser to cause significant damage, it provides additional time for other drones in a swarm to survive.
+The first project is the "Drone Ballet" project. The basic premise is that if a drone is hit by a high-energy directed laser, it will likely become defective and unable to achieve its mission goals. However, if the drone can increase the amount of time required for the laser to cause significant damage, it provides additional time for other drones in a swarm to survive.
 
 The primary research question is: **How long can a drone prolong its exposure to a directed laser before becoming fully defective or sustaining structural damage?**
 
@@ -17,10 +17,8 @@ The second project involves the **benchmarking of drones**. Based on a literatur
 The primary research question is: **Can a readily manufacturable drone test setup and simulation environment be designed to compare drone behaviors in both single-drone and swarm applications, while also incorporating computational performance tests through the use of ArUco tags?**
 
 
-My resume and contact-information can be found below:
+My contact-information can be found below:
 
 Phone: +1 540-553-1573
 
 Email: snoandmo@gmail.com 
-
-[Resume](images\Distler_Resume_26.pdf)
