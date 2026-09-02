@@ -8,7 +8,7 @@
 %     and optionally convection/radiation at the external boundary.
 %   - Each material/frequency case runs until either:
 %         1) 60 seconds have elapsed, OR
-%         2) the maximum nodal temperature reaches the material threshold at which point a phase change beings
+%         2) the maximum nodal temperature reaches the material threshold at which point a phase change begins
 %
 % Materials:
 %   PLA
@@ -21,7 +21,7 @@ clc;
 close all;
 
 %% USER CONTROLS
-STEP_FILE = "Skydio_x10_model.step"; % relative pathway
+STEP_FILE = "C:\Users\jonat\Downloads\Skydio_x10_model.step"; % relative pathway
 
 % HEAT-LOSS TOGGLES
 % Set either value to true/false to independently enable or disable
@@ -87,8 +87,6 @@ materials = struct(...
 nMaterials = numel(materials);
 
 %% OUTPUT FOLDER
-outputFolder = "thermal_results_" + heatLossMode;
-
 if USE_CONVECTION && USE_RADIATION
     heatLossMode = "conv_rad";
 elseif USE_CONVECTION
@@ -98,6 +96,8 @@ elseif USE_RADIATION
 else
     heatLossMode = "conduction_laser_only";
 end
+
+outputFolder = "thermal_results_" + heatLossMode;
 
 if ~exist(outputFolder, "dir")
     mkdir(outputFolder);
@@ -110,7 +110,36 @@ WAVELENGTH = 1064e-9;                   % m
 D = 0.1;                                % m
 M2 = 1.5;                               % -
 
-% Laser origin
+% PHYSICAL CONSTANTS / AIR PROPERTIES
+sigma = 5.670374419e-8;                 % Stefan-Boltzmann constant [W/(m^2*K^4)]
+air_density = 1.184;                    % Air density [kg/m^3]
+air_viscosity = 1.849e-5;               % Dynamic viscosity [Pa*s]
+air_conductivity = 0.0263;              % Thermal conductivity [W/(m*K)]
+air_prandtl = 0.707;                    % Prandtl number [-]
+L_characteristic = max(meshSize, 1e-3); % Characteristic length [m]
+h_free = 5.0;                           % Free convection coefficient [W/(m^2*K)]
+
+% LASER POSITION INPUTS
+% These offsets are relative to the drone centroid.
+% Press Enter to use the requested defaults: x = +2000 m, y = 0 m, z = -80 m.
+fprintf("\nLASER POSITION INPUTS\n");
+
+laser_offset_x = input("Laser x offset from drone centroid [m] (default 2000): ");
+if isempty(laser_offset_x)
+    laser_offset_x = 2000;
+end
+
+laser_offset_y = input("Laser y offset from drone centroid [m] (default 0): ");
+if isempty(laser_offset_y)
+    laser_offset_y = 0;
+end
+
+laser_offset_z = input("Laser z offset from drone centroid [m] (default -80): ");
+if isempty(laser_offset_z)
+    laser_offset_z = -80;
+end
+
+% Laser origin is assigned after the drone centroid is known.
 % This is automatically moved outside the drone after the geometry
 % dimensions are determined.
 laser_origin_world = [0.0; 0.0; 0.0];
@@ -290,20 +319,16 @@ trajectory_z = ...
     laser_target_z .* ones(size(trajectory_theta));
 
  
-% MOVE LASER SOURCE OUTSIDE THE DRONE
- 
-
-geometryDiagonal = sqrt(...
-    box_length^2 + ...
-    box_width^2 + ...
-    box_height^2);
-
-laser_standoff = max(2.0, 5.0 * geometryDiagonal);
-
+% MOVE LASER SOURCE USING USER-DEFINED OFFSET
+% The offsets are relative to the drone centroid.
 laser_origin_world = ...
-    box_centroid + [0; 0; laser_standoff];
+    box_centroid + ...
+    [laser_offset_x; laser_offset_y; laser_offset_z];
 
 fprintf("\nLASER CONFIGURATION\n");
+
+fprintf("Laser offset from centroid: [%.4f, %.4f, %.4f] m\n", ...
+    laser_offset_x, laser_offset_y, laser_offset_z);
 
 fprintf("Laser origin: [%.4f, %.4f, %.4f] m\n", ...
     laser_origin_world(1), ...
@@ -1995,10 +2020,13 @@ function q = laserHeatFluxCircular(...
         D ./ ...
         (pi .* M2);
 
+    zR = pi .* w0.^2 ./ ...
+        (M2 .* WAVELENGTH);
+
     w = ...
-        sqrt(...
-        w0.^2 + ...
-        (WAVELENGTH .* range).^2);
+        w0 .* sqrt(...
+        1 + ...
+        (range ./ max(zR, eps)).^2);
 
     %% ATMOSPHERIC ATTENUATION
 
