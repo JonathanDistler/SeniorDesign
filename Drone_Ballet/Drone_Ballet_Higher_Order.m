@@ -819,962 +819,614 @@ for i = 1:numObjects
 end
 
 
+
 %% ================================================================
-% 25. CREATE STORAGE
+% 25. TRANSIENT / RPM SWEEP SETTINGS
 % ================================================================
 
-results = ...
-    cell(numObjects,1);
+% These are taken from the transient settings in
+% drone_thermal_combined_fixed.m.
+t_final = 60.0;                    % [s]
+dt = 0.01;                        % [s]
 
+% Requested frequency sweep: 0 to 60 RPM in 10 RPM increments.
+rpmSweep = 0:10:60;
+frequencySweep_Hz = rpmSweep ./ 60;
+omegaSweep_rad_s = 2*pi*frequencySweep_Hz;
+nRPM = numel(rpmSweep);
 
-models = ...
-    cell(numObjects,1);
+% Air properties from the transient source script.
+air_density = 1.184;              % [kg/m^3]
+air_viscosity = 1.849e-5;         % [Pa*s]
+air_conductivity = 0.0263;       % [W/(m*K)]
+air_prandtl = 0.707;
+L_characteristic = max(meshSize,1e-3);
 
-
-meshHmaxUsed = ...
-    nan(numObjects,1);
-
-
-meshHminUsed = ...
-    nan(numObjects,1);
-
+fprintf('\n');
+fprintf('============================================================\n');
+fprintf('TRANSIENT RPM SWEEP\n');
+fprintf('============================================================\n');
+fprintf('Time step: %.3f s\n',dt);
+fprintf('Final time: %.1f s\n',t_final);
+fprintf('RPM cases: ');
+fprintf('%g ',rpmSweep);
+fprintf('\n');
 
 %% ================================================================
-% 26. SOLVE EACH OBJECT
+% 26. CREATE STORAGE
+% ================================================================
+
+results = cell(numObjects,nRPM);
+models = cell(numObjects,1);
+meshHmaxUsed = nan(numObjects,1);
+meshHminUsed = nan(numObjects,1);
+
+maxTemperature_K = nan(numObjects,nRPM);
+finalTemperature_K = nan(numObjects,nRPM);
+timeOfMaximum_s = nan(numObjects,nRPM);
+finalAverageTemperature_K = nan(numObjects,nRPM);
+maxLaserPower_W = nan(numObjects,nRPM);
+totalLaserEnergy_J = nan(numObjects,nRPM);
+averageConvection_W_m2K = nan(numObjects,nRPM);
+terminationReason = strings(numObjects,nRPM);
+
+% Store time histories in cells so the script retains the transient
+% information from each RPM case without forcing all cases to have
+% identical termination behavior.
+timeHistories = cell(numObjects,nRPM);
+maxTemperatureHistories_K = cell(numObjects,nRPM);
+laserPowerHistories_W = cell(numObjects,nRPM);
+
+%% ================================================================
+% 27. MESH EACH COMPONENT ONCE
 % ================================================================
 
 for i = 1:numObjects
 
-
-    fprintf('\n');
-    fprintf('------------------------------------------------------------\n');
-
-
-    fprintf( ...
-        'OBJECT %d / %d\n', ...
-        i, ...
-        numObjects);
-
-
-    fprintf( ...
-        'Component: %s %d\n', ...
-        assemblyObjects(i).componentType, ...
+    fprintf('\n------------------------------------------------------------\n');
+    fprintf('OBJECT %d / %d\n',i,numObjects);
+    fprintf('Component: %s %d\n', ...
+        assemblyObjects(i).componentType,...
         assemblyObjects(i).componentNumber);
+    fprintf('Material:  %s\n',assemblyObjects(i).material);
 
-
-    fprintf( ...
-        'Material:  %s\n', ...
-        assemblyObjects(i).material);
-
-
-    %% ------------------------------------------------------------
-    % Material
-    % -------------------------------------------------------------
-
-    materialName = ...
-        assemblyObjects(i).material;
-
-
+    materialName = assemblyObjects(i).material;
     if ~isfield(materials,materialName)
-
-        error( ...
-            "Material '%s' is not defined.", ...
-            materialName);
-
+        error("Material '%s' is not defined.",materialName);
     end
+    mat = materials.(materialName);
 
+    fprintf('rho = %.3f kg/m^3\n',mat.rho);
+    fprintf('cp  = %.3f J/(kg K)\n',mat.cp);
+    fprintf('k   = %.3f W/(m K)\n',mat.k);
 
-    mat = ...
-        materials.(materialName);
-
-
-    fprintf( ...
-        'rho = %.3f kg/m^3\n', ...
-        mat.rho);
-
-
-    fprintf( ...
-        'cp  = %.3f J/(kg K)\n', ...
-        mat.cp);
-
-
-    fprintf( ...
-        'k   = %.3f W/(m K)\n', ...
-        mat.k);
-
-
-    %% ------------------------------------------------------------
-    % Create thermal model
-    % -------------------------------------------------------------
-
-    model = ...
-        femodel( ...
-        AnalysisType="thermalTransient", ...
+    model = femodel(...
+        AnalysisType="thermalTransient",...
         Geometry=assemblyObjects(i).geometry);
 
-
-    %% ------------------------------------------------------------
-    % Material properties
-    % -------------------------------------------------------------
-
-    model.MaterialProperties = ...
-        materialProperties( ...
-        ThermalConductivity=mat.k, ...
-        MassDensity=mat.rho, ...
+    model.MaterialProperties = materialProperties(...
+        ThermalConductivity=mat.k,...
+        MassDensity=mat.rho,...
         SpecificHeat=mat.cp);
 
+    model.CellIC = cellIC(Temperature=T0);
+    model.StefanBoltzmann = sigma;
 
-    %% ------------------------------------------------------------
-    % Initial temperature
-    % -------------------------------------------------------------
+    nFaces = assemblyObjects(i).geometry.NumFaces;
+    allFaces = 1:nFaces;
 
-    model.CellIC = ...
-        cellIC( ...
-        Temperature=T0);
-
-
-    %% ------------------------------------------------------------
-    % Stefan-Boltzmann constant
-    % -------------------------------------------------------------
-
-    model.StefanBoltzmann = ...
-        sigma;
-
-
-    %% ------------------------------------------------------------
-    % All component faces
-    % -------------------------------------------------------------
-
-    nFaces = ...
-        assemblyObjects(i).geometry.NumFaces;
-
-
-    allFaces = ...
-        1:nFaces;
-
-
-    %% ------------------------------------------------------------
-    % Laser targeting
-    % -------------------------------------------------------------
-
-    receivesLaser = ...
-        isTargetComponent( ...
-        assemblyObjects(i), ...
-        laserTarget);
-
+    receivesLaser = isTargetComponent(assemblyObjects(i),laserTarget);
 
     if receivesLaser
-
-        laserScale = ...
-            1.0;
-
+        laserScale = 1.0;
     else
-
-        laserScale = ...
-            LASER_SPILLOVER_FRACTION;
-
+        laserScale = LASER_SPILLOVER_FRACTION;
     end
-
-
-    %% ------------------------------------------------------------
-    % Laser heat function
-    % -------------------------------------------------------------
-
-    laserFunction = ...
-        @(location,state) ...
-        laserHeatFlux( ...
-        location, ...
-        state, ...
-        laserOrigin, ...
-        laserDirection, ...
-        P0, ...
-        alpha, ...
-        w0, ...
-        zR, ...
-        laserScale);
-
-
-    %% ------------------------------------------------------------
-    % Surface boundary condition
-    % -------------------------------------------------------------
-
-    if USE_CONVECTION && USE_RADIATION
-
-
-        if laserScale > 0
-
-            surfaceLoad = ...
-                faceLoad( ...
-                Heat=laserFunction, ...
-                ConvectionCoefficient=h_free, ...
-                AmbientTemperature=Tinf, ...
-                Emissivity=emissivity);
-
-        else
-
-            surfaceLoad = ...
-                faceLoad( ...
-                ConvectionCoefficient=h_free, ...
-                AmbientTemperature=Tinf, ...
-                Emissivity=emissivity);
-
-        end
-
-
-    elseif USE_CONVECTION
-
-
-        if laserScale > 0
-
-            surfaceLoad = ...
-                faceLoad( ...
-                Heat=laserFunction, ...
-                ConvectionCoefficient=h_free, ...
-                AmbientTemperature=Tinf);
-
-        else
-
-            surfaceLoad = ...
-                faceLoad( ...
-                ConvectionCoefficient=h_free, ...
-                AmbientTemperature=Tinf);
-
-        end
-
-
-    elseif USE_RADIATION
-
-
-        if laserScale > 0
-
-            surfaceLoad = ...
-                faceLoad( ...
-                Heat=laserFunction, ...
-                Emissivity=emissivity);
-
-        else
-
-            surfaceLoad = ...
-                faceLoad( ...
-                Emissivity=emissivity);
-
-        end
-
-
-    else
-
-
-        if laserScale > 0
-
-            surfaceLoad = ...
-                faceLoad( ...
-                Heat=laserFunction);
-
-        else
-
-            surfaceLoad = ...
-                faceLoad();
-
-        end
-
-    end
-
-
-    %% ------------------------------------------------------------
-    % Apply surface load
-    % -------------------------------------------------------------
-
-    model.FaceLoad(allFaces) = ...
-        surfaceLoad;
-
-
-    %% ------------------------------------------------------------
-    % Laser status
-    % -------------------------------------------------------------
 
     if receivesLaser
-
-        fprintf( ...
-            'LASER: FULL POWER TARGET\n');
-
+        fprintf('LASER: FULL POWER TARGET\n');
     elseif laserScale > 0
-
-        fprintf( ...
-            'LASER: %.3f %% SPILLOVER\n', ...
-            100*laserScale);
-
+        fprintf('LASER: %.3f %% SPILLOVER\n',100*laserScale);
     else
-
-        fprintf( ...
-            'LASER: OFF FOR THIS COMPONENT\n');
-
+        fprintf('LASER: OFF FOR THIS COMPONENT\n');
     end
 
-
-    %% ============================================================
-    % AUTOMATIC MESH RETRY
-    % ============================================================
-
-    fprintf('\n');
-    fprintf('Generating FEM mesh...\n');
-
-
-    % -------------------------------------------------------------
-    % Mesh candidates
-    %
-    % Hmin is intentionally smaller than Hmax.
-    %
-    % This is particularly important for imported CAD geometry
-    % containing small curved or thin features.
+    %% ------------------------------------------------------------
+    % Mesh retry settings from phantom3_assembly_thermal.m
     % -------------------------------------------------------------
 
-    meshAttempts = ...
-        [ ...
-        meshSize, ...
-        meshSize*0.75, ...
-        meshSize*0.50, ...
-        meshSize*0.30, ...
-        meshSize*0.20, ...
-        meshSize*0.10 ...
-        ];
+    fprintf('\nGenerating FEM mesh...\n');
 
+    meshAttempts = [ ...
+        meshSize,...
+        meshSize*0.75,...
+        meshSize*0.50,...
+        meshSize*0.30,...
+        meshSize*0.20,...
+        meshSize*0.10];
 
-    meshSuccess = ...
-        false;
-
-
+    meshSuccess = false;
     lastMeshError = [];
 
+    for meshAttempt = 1:length(meshAttempts)
+        currentHmax = meshAttempts(meshAttempt);
+        currentHmin = currentHmax/5;
 
-    %% ------------------------------------------------------------
-    % Try each mesh
-    % -------------------------------------------------------------
-
-    for meshAttempt = ...
-            1:length(meshAttempts)
-
-
-        currentHmax = ...
-            meshAttempts(meshAttempt);
-
-
-        currentHmin = ...
-            currentHmax / 5;
-
-
-        fprintf( ...
-            '  Mesh attempt %d/%d: Hmax = %.5f m, Hmin = %.5f m\n', ...
-            meshAttempt, ...
-            length(meshAttempts), ...
-            currentHmax, ...
-            currentHmin);
-
+        fprintf('  Mesh attempt %d/%d: Hmax = %.5f m, Hmin = %.5f m\n',...
+            meshAttempt,length(meshAttempts),currentHmax,currentHmin);
 
         try
-
-
-            model = ...
-                generateMesh( ...
-                model, ...
-                Hmax=currentHmax, ...
+            model = generateMesh(...
+                model,...
+                Hmax=currentHmax,...
                 Hmin=currentHmin);
 
+            meshSuccess = true;
+            meshHmaxUsed(i) = currentHmax;
+            meshHminUsed(i) = currentHmin;
 
-            meshSuccess = ...
-                true;
-
-
-            meshHmaxUsed(i) = ...
-                currentHmax;
-
-
-            meshHminUsed(i) = ...
-                currentHmin;
-
-
-            fprintf( ...
-                '  Mesh successful.\n');
-
-
-            fprintf( ...
-                '  FEM nodes:    %d\n', ...
-                size( ...
-                model.Geometry.Mesh.Nodes, ...
-                2));
-
-
-            fprintf( ...
-                '  FEM elements: %d\n', ...
-                size( ...
-                model.Geometry.Mesh.Elements, ...
-                2));
-
-
+            fprintf('  Mesh successful.\n');
+            fprintf('  FEM nodes:    %d\n',size(model.Geometry.Mesh.Nodes,2));
+            fprintf('  FEM elements: %d\n',size(model.Geometry.Mesh.Elements,2));
             break;
 
-
         catch ME
-
-
-            lastMeshError = ...
-                ME;
-
-
-            fprintf( ...
-                '  Mesh failed.\n');
-
-
-            fprintf( ...
-                '  Reason: %s\n', ...
-                ME.message);
-
-
-            if meshAttempt < ...
-                    length(meshAttempts)
-
-                fprintf( ...
-                    '  Retrying with a finer mesh...\n');
-
+            lastMeshError = ME;
+            fprintf('  Mesh failed.\n');
+            fprintf('  Reason: %s\n',ME.message);
+            if meshAttempt < length(meshAttempts)
+                fprintf('  Retrying with a finer mesh...\n');
             end
-
         end
-
     end
-
-
-    %% ------------------------------------------------------------
-    % Mesh failure
-    % -------------------------------------------------------------
 
     if ~meshSuccess
-
-        error( ...
-            "Meshing failed for object %d." + ...
-            newline + ...
-            "Component: %s %d" + ...
-            newline + ...
-            "Material: %s" + ...
-            newline + ...
-            "The script tried multiple Hmax/Hmin values." + ...
-            newline + ...
-            "Last MATLAB error:" + ...
-            newline + ...
-            "%s", ...
-            i, ...
-            assemblyObjects(i).componentType, ...
-            assemblyObjects(i).componentNumber, ...
-            assemblyObjects(i).material, ...
-            lastMeshError.message);
-
+        error("Meshing failed for object %d.\nComponent: %s %d\nMaterial: %s\nLast MATLAB error:\n%s",...
+            i,assemblyObjects(i).componentType,assemblyObjects(i).componentNumber,...
+            assemblyObjects(i).material,lastMeshError.message);
     end
 
+    models{i} = model;
+
+    %% ------------------------------------------------------------
+    % Mesh geometry needed by the transient source script
+    % -------------------------------------------------------------
+
+    meshNodes = model.Geometry.Mesh.Nodes;
+    tetElements = model.Geometry.Mesh.Elements;
+
+    if size(tetElements,1) < 4
+        error('Unexpected FEM mesh for object %d: tetrahedral elements need four corner nodes.',i);
+    end
+
+    % Geometry bounds for rotational laser/convection calculations.
+    x_nodes = meshNodes(1,:);
+    y_nodes = meshNodes(2,:);
+    z_nodes = meshNodes(3,:);
+
+    x_min = min(x_nodes); x_max = max(x_nodes);
+    y_min = min(y_nodes); y_max = max(y_nodes);
+    z_min = min(z_nodes); z_max = max(z_nodes);
+
+    box_length = x_max - x_min;
+    box_width = y_max - y_min;
+    box_height = z_max - z_min;
+
+    box_centroid = [ ...
+        (x_min+x_max)/2; ...
+        (y_min+y_max)/2; ...
+        (z_min+z_max)/2];
+
+    % Use the smaller horizontal dimension, as in the transient source.
+    trajectory_radius = 0.40*min(box_length,box_width);
+
+    % Use the laser origin defined from the assembly centroid in the
+    % Phantom script. The moving target is centered on this component's
+    % bounding-box centroid, matching the transient script's rotating
+    % target formulation.
+    componentLaserOrigin = laserOrigin(:);
+
+    %% ------------------------------------------------------------
+    % Surface triangulation and areas
+    % -------------------------------------------------------------
+
+    tetCornerElements = tetElements(1:4,:)';
+    TRmesh = triangulation(tetCornerElements,meshNodes');
+    [boundaryTriangles,~] = freeBoundary(TRmesh);
+
+    p1 = meshNodes(:,boundaryTriangles(:,1));
+    p2 = meshNodes(:,boundaryTriangles(:,2));
+    p3 = meshNodes(:,boundaryTriangles(:,3));
+
+    triangleVectors1 = p2-p1;
+    triangleVectors2 = p3-p1;
+    triangleCross = cross(triangleVectors1',triangleVectors2',2);
+
+    boundaryTriangleAreas = 0.5*vecnorm(triangleCross,2,2);
+    boundaryTriangleCentroids = (p1+p2+p3)'/3;
+
+    %% ------------------------------------------------------------
+    % Tetrahedral volumes
+    % -------------------------------------------------------------
+
+    a = meshNodes(:,tetElements(2,:))-meshNodes(:,tetElements(1,:));
+    b = meshNodes(:,tetElements(3,:))-meshNodes(:,tetElements(1,:));
+    c = meshNodes(:,tetElements(4,:))-meshNodes(:,tetElements(1,:));
+
+    tetVolumes = abs(dot(a,cross(b,c,1),1))/6;
 
     %% ============================================================
-    % THERMAL SOLVE
+    % 28. RPM LOOP
     % ============================================================
 
-    fprintf('\n');
-    fprintf('Solving thermal transient...\n');
+    for freqIndex = 1:nRPM
 
+        rpm = rpmSweep(freqIndex);
+        frequency_Hz = frequencySweep_Hz(freqIndex);
+        omega_z = omegaSweep_rad_s(freqIndex);
 
-    try
+        fprintf('\n------------------------------------------------------------\n');
+        fprintf('OBJECT %d | %s | RPM = %.0f | f = %.4f Hz\n',...
+            i,assemblyObjects(i).material,rpm,frequency_Hz);
+        fprintf('Angular velocity: %.6f rad/s\n',omega_z);
+        fprintf('------------------------------------------------------------\n');
 
-        result = ...
-            solve( ...
-            model, ...
-            tList);
+        % Initial condition at the beginning of this RPM case.
+        model.CellIC = cellIC(Temperature=T0);
 
+        % Scale the laser exactly according to the Phantom component target.
+        laserHeatFunction = @(location,state) ...
+            laserScale .* laserHeatFluxCircular(...
+            location,state,...
+            box_centroid,...
+            trajectory_radius,...
+            omega_z,...
+            0,...
+            componentLaserOrigin,...
+            P0,...
+            alpha,...
+            WAVELENGTH,...
+            D,...
+            M2,...
+            1.0);
 
-    catch ME
+        if USE_CONVECTION
+            convectionFunction = @(location,state) ...
+                convectionCoefficientRotation(...
+                location,omega_z,box_centroid,...
+                air_density,air_viscosity,air_conductivity,...
+                air_prandtl,L_characteristic,h_free);
+        end
 
-        error( ...
-            "Thermal solve failed for object %d." + ...
-            newline + ...
-            "Component: %s %d" + ...
-            newline + ...
-            "Material: %s" + ...
-            newline + ...
-            "MATLAB reported:" + ...
-            newline + ...
-            "%s", ...
-            i, ...
-            assemblyObjects(i).componentType, ...
-            assemblyObjects(i).componentNumber, ...
-            assemblyObjects(i).material, ...
-            ME.message);
+        % Apply the transient source script's time-dependent boundary
+        % conditions to the entire external boundary.
+        if USE_CONVECTION && USE_RADIATION
+            model.FaceLoad(allFaces) = faceLoad(...
+                Heat=laserHeatFunction,...
+                ConvectionCoefficient=convectionFunction,...
+                AmbientTemperature=Tinf,...
+                Emissivity=emissivity);
+        elseif USE_CONVECTION
+            model.FaceLoad(allFaces) = faceLoad(...
+                Heat=laserHeatFunction,...
+                ConvectionCoefficient=convectionFunction,...
+                AmbientTemperature=Tinf);
+        elseif USE_RADIATION
+            model.FaceLoad(allFaces) = faceLoad(...
+                Heat=laserHeatFunction,...
+                AmbientTemperature=Tinf,...
+                Emissivity=emissivity);
+        else
+            model.FaceLoad(allFaces) = faceLoad(Heat=laserHeatFunction);
+        end
+
+        currentTime = 0;
+        currentTemperature = T0*ones(size(meshNodes,2),1);
+
+        timeHistory = 0;
+        maxTemperatureHistory = max(currentTemperature);
+        laserPowerHistory = 0;
+
+        maxT = max(currentTemperature);
+        maxTTime = 0;
+        terminated = false;
+
+        while currentTime < t_final
+
+            nextTime = min(currentTime+dt,t_final);
+
+            % Calculate absorbed laser power on the actual external
+            % triangular surface, following the second source script.
+            location = struct(...
+                "x",boundaryTriangleCentroids(:,1)',...
+                "y",boundaryTriangleCentroids(:,2)',...
+                "z",boundaryTriangleCentroids(:,3)');
+
+            state = struct("time",nextTime);
+
+            qTriangle = laserScale .* laserHeatFluxCircular(...
+                location,state,...
+                box_centroid,...
+                trajectory_radius,...
+                omega_z,...
+                0,...
+                componentLaserOrigin,...
+                P0,...
+                alpha,...
+                WAVELENGTH,...
+                D,...
+                M2,...
+                1.0);
+
+            qTriangle = reshape(qTriangle,[],1);
+            laserPower = sum(qTriangle.*boundaryTriangleAreas);
+
+            % Prevent numerical integration from exceeding the incident
+            % laser power available at the source-to-target range.
+            laserRange = norm(box_centroid-componentLaserOrigin);
+            availableIncidentPower = P0*exp(-alpha*laserRange);
+            laserPower = min(max(laserPower,0),availableIncidentPower*laserScale);
+
+            % Pass the temperature at the end of the previous short step
+            % into the next solve interval. Since this object keeps the
+            % same mesh throughout the case, interpolation is exact up
+            % to the FEM nodal representation.
+            if currentTime > 0
+                previousNodes = meshNodes;
+                previousTemperature = currentTemperature;
+
+                T_initial_function = @(location) ...
+                    interpolatePreviousTemperature(...
+                    location,previousNodes,previousTemperature);
+
+                model.CellIC = cellIC(Temperature=T_initial_function);
+            end
+
+            try
+                stepResults = solve(model,[currentTime,nextTime]);
+            catch ME
+                error("Thermal solve failed for object %d at %.0f RPM and t = %.3f s.\nComponent: %s %d\nMaterial: %s\nMATLAB reported:\n%s",...
+                    i,rpm,currentTime,...
+                    assemblyObjects(i).componentType,...
+                    assemblyObjects(i).componentNumber,...
+                    assemblyObjects(i).material,...
+                    ME.message);
+            end
+
+            currentTemperature = stepResults.Temperature(:,end);
+            currentTime = nextTime;
+
+            currentMax = max(currentTemperature);
+            if currentMax > maxT
+                maxT = currentMax;
+                maxTTime = currentTime;
+            end
+
+            timeHistory(end+1) = currentTime; %#ok<SAGROW>
+            maxTemperatureHistory(end+1) = currentMax; %#ok<SAGROW>
+            laserPowerHistory(end+1) = laserPower; %#ok<SAGROW>
+
+            % Keep the terminal output style of the transient source.
+            if abs(currentTime-round(currentTime)) < dt/2 || currentTime >= t_final
+                fprintf('t = %6.2f s | Tmax = %8.2f C | laser P = %9.3f W\n',...
+                    currentTime,currentMax-273.15,laserPower);
+            end
+        end
+
+        if terminated
+            terminationReason(i,freqIndex) = "Temperature threshold";
+        else
+            terminationReason(i,freqIndex) = "60 second limit";
+        end
+
+        % Final statistics.
+        maxTemperature_K(i,freqIndex) = maxT;
+        finalTemperature_K(i,freqIndex) = currentMax;
+        finalAverageTemperature_K(i,freqIndex) = mean(currentTemperature);
+        timeOfMaximum_s(i,freqIndex) = maxTTime;
+        maxLaserPower_W(i,freqIndex) = max(laserPowerHistory);
+        totalLaserEnergy_J(i,freqIndex) = trapz(timeHistory,laserPowerHistory);
+
+        if USE_CONVECTION
+            nodeX = meshNodes(1,:);
+            nodeY = meshNodes(2,:);
+            radialDistance = sqrt(...
+                (nodeX-box_centroid(1)).^2 + ...
+                (nodeY-box_centroid(2)).^2);
+            velocity = abs(omega_z).*radialDistance;
+            Re = air_density.*velocity.*L_characteristic./air_viscosity;
+            Re = max(Re,1);
+            Nu = 0.664.*sqrt(Re).*air_prandtl.^(1/3);
+            turbulent = Re >= 5e5;
+            Nu(turbulent) = ...
+                (0.037.*Re(turbulent).^0.8-871).*air_prandtl.^(1/3);
+            h_nodes = h_free + Nu.*air_conductivity./L_characteristic;
+            averageConvection_W_m2K(i,freqIndex) = mean(h_nodes);
+        else
+            averageConvection_W_m2K(i,freqIndex) = 0;
+        end
+
+        timeHistories{i,freqIndex} = timeHistory;
+        maxTemperatureHistories_K{i,freqIndex} = maxTemperatureHistory;
+        laserPowerHistories_W{i,freqIndex} = laserPowerHistory;
+        results{i,freqIndex} = stepResults;
 
     end
-
-
-    fprintf( ...
-        'Thermal solve complete.\n');
-
-
-    %% ------------------------------------------------------------
-    % Store
-    % -------------------------------------------------------------
-
-    results{i} = ...
-        result;
-
-
-    models{i} = ...
-        model;
-
-
-    %% ------------------------------------------------------------
-    % Temperature statistics
-    % -------------------------------------------------------------
-
-    finalTemperature = ...
-        result.Temperature(:,end);
-
-
-    Tmin = ...
-        min(finalTemperature);
-
-
-    Tmax = ...
-        max(finalTemperature);
-
-
-    fprintf('\n');
-
-
-    fprintf( ...
-        'Minimum final temperature: %.3f K\n', ...
-        Tmin);
-
-
-    fprintf( ...
-        'Maximum final temperature: %.3f K\n', ...
-        Tmax);
-
-
-    fprintf( ...
-        'Maximum final temperature: %.3f C\n', ...
-        Tmax - 273.15);
-
-
 end
 
+%% ================================================================
+% 29. RPM SUMMARY TABLE
+% ================================================================
+
+rows = numObjects*nRPM;
+summaryObject = strings(rows,1);
+summaryType = strings(rows,1);
+summaryNumber = zeros(rows,1);
+summaryMaterial = strings(rows,1);
+summaryRPM = zeros(rows,1);
+summaryFrequency_Hz = zeros(rows,1);
+summaryMaxK = zeros(rows,1);
+summaryMaxC = zeros(rows,1);
+summaryFinalK = zeros(rows,1);
+summaryFinalC = zeros(rows,1);
+summaryTimeMax_s = zeros(rows,1);
+summaryMaxLaserPower_W = zeros(rows,1);
+summaryLaserEnergy_J = zeros(rows,1);
+summaryAverageH = zeros(rows,1);
+summaryMeshHmax = zeros(rows,1);
+summaryMeshHmin = zeros(rows,1);
+summaryTermination = strings(rows,1);
+
+r = 0;
+for i = 1:numObjects
+    for j = 1:nRPM
+        r = r+1;
+        summaryObject(r) = assemblyObjects(i).name;
+        summaryType(r) = assemblyObjects(i).componentType;
+        summaryNumber(r) = assemblyObjects(i).componentNumber;
+        summaryMaterial(r) = assemblyObjects(i).material;
+        summaryRPM(r) = rpmSweep(j);
+        summaryFrequency_Hz(r) = frequencySweep_Hz(j);
+        summaryMaxK(r) = maxTemperature_K(i,j);
+        summaryMaxC(r) = maxTemperature_K(i,j)-273.15;
+        summaryFinalK(r) = finalTemperature_K(i,j);
+        summaryFinalC(r) = finalTemperature_K(i,j)-273.15;
+        summaryTimeMax_s(r) = timeOfMaximum_s(i,j);
+        summaryMaxLaserPower_W(r) = maxLaserPower_W(i,j);
+        summaryLaserEnergy_J(r) = totalLaserEnergy_J(i,j);
+        summaryAverageH(r) = averageConvection_W_m2K(i,j);
+        summaryMeshHmax(r) = meshHmaxUsed(i);
+        summaryMeshHmin(r) = meshHminUsed(i);
+        summaryTermination(r) = terminationReason(i,j);
+    end
+end
+
+summaryTable = table(...
+    summaryObject,summaryType,summaryNumber,summaryMaterial,...
+    summaryRPM,summaryFrequency_Hz,...
+    summaryMaxK,summaryMaxC,summaryFinalK,summaryFinalC,...
+    summaryTimeMax_s,summaryMaxLaserPower_W,summaryLaserEnergy_J,...
+    summaryAverageH,summaryMeshHmax,summaryMeshHmin,summaryTermination,...
+    'VariableNames',{...
+    'ObjectName','ComponentType','ComponentNumber','Material',...
+    'RPM','Frequency_Hz',...
+    'MaximumTemperature_K','MaximumTemperature_C',...
+    'FinalTemperature_K','FinalTemperature_C',...
+    'TimeOfMaximum_s','MaximumLaserPower_W','TotalLaserEnergy_J',...
+    'AverageConvection_W_m2K','MeshHmax_m','MeshHmin_m','Termination'});
 
 %% ================================================================
-% 27. FINAL TEMPERATURE SUMMARY
+% 30. PRINT FINAL SUMMARY
 % ================================================================
 
 fprintf('\n');
 fprintf('============================================================\n');
-fprintf('FINAL TEMPERATURE SUMMARY\n');
+fprintf('FINAL RPM SWEEP SUMMARY\n');
 fprintf('============================================================\n');
 
-
-summaryName = ...
-    strings(numObjects,1);
-
-
-summaryType = ...
-    strings(numObjects,1);
-
-
-summaryNumber = ...
-    zeros(numObjects,1);
-
-
-summaryMaterial = ...
-    strings(numObjects,1);
-
-
-summaryMaxK = ...
-    zeros(numObjects,1);
-
-
-summaryMaxC = ...
-    zeros(numObjects,1);
-
-
-summaryMeshHmax = ...
-    zeros(numObjects,1);
-
-
-summaryMeshHmin = ...
-    zeros(numObjects,1);
-
-
-for i = 1:numObjects
-
-
-    Tfinal = ...
-        results{i}.Temperature(:,end);
-
-
-    summaryName(i) = ...
-        assemblyObjects(i).name;
-
-
-    summaryType(i) = ...
-        assemblyObjects(i).componentType;
-
-
-    summaryNumber(i) = ...
-        assemblyObjects(i).componentNumber;
-
-
-    summaryMaterial(i) = ...
-        assemblyObjects(i).material;
-
-
-    summaryMaxK(i) = ...
-        max(Tfinal);
-
-
-    summaryMaxC(i) = ...
-        summaryMaxK(i) - 273.15;
-
-
-    summaryMeshHmax(i) = ...
-        meshHmaxUsed(i);
-
-
-    summaryMeshHmin(i) = ...
-        meshHminUsed(i);
-
-
-    fprintf( ...
-        '%-10s %-7s %d %-18s %10.3f K %10.3f C\n', ...
-        assemblyObjects(i).name, ...
-        assemblyObjects(i).componentType, ...
-        assemblyObjects(i).componentNumber, ...
-        assemblyObjects(i).material, ...
-        summaryMaxK(i), ...
-        summaryMaxC(i));
-
+for j = 1:nRPM
+    fprintf('\nRPM = %.0f\n',rpmSweep(j));
+    for i = 1:numObjects
+        fprintf('  Object %2d | %-6s %d | %-18s | Tmax = %10.3f C | Final = %10.3f C\n',...
+            i,assemblyObjects(i).componentType,assemblyObjects(i).componentNumber,...
+            assemblyObjects(i).material,...
+            maxTemperature_K(i,j)-273.15,...
+            finalTemperature_K(i,j)-273.15);
+    end
 end
 
-
 %% ================================================================
-% 28. SUMMARY TABLE
+% 31. PLOT MAXIMUM TEMPERATURE VS RPM
 % ================================================================
 
-summaryTable = ...
-    table( ...
-    summaryName, ...
-    summaryType, ...
-    summaryNumber, ...
-    summaryMaterial, ...
-    summaryMaxK, ...
-    summaryMaxC, ...
-    summaryMeshHmax, ...
-    summaryMeshHmin, ...
-    'VariableNames', ...
-    { ...
-    'ObjectName', ...
-    'ComponentType', ...
-    'ComponentNumber', ...
-    'Material', ...
-    'MaximumTemperature_K', ...
-    'MaximumTemperature_C', ...
-    'MeshHmax_m', ...
-    'MeshHmin_m' ...
-    });
-
-
-%% ================================================================
-% 29. ASSEMBLY TEMPERATURE PLOT
-% ================================================================
-
-fprintf('\n');
-fprintf('CREATING ASSEMBLY TEMPERATURE PLOT\n');
-
-
-figure( ...
-    'Name', ...
-    'Phantom Drone Final Temperature');
-
-
+figure('Name','Maximum Temperature vs RPM');
 hold on;
 
-
 for i = 1:numObjects
-
-
-    finalTemperature = ...
-        results{i}.Temperature(:,end);
-
-
-    pdeplot3D( ...
-        results{i}.Mesh, ...
-        ColorMapData=finalTemperature, ...
-        FaceAlpha=1);
-
+    plot(rpmSweep,maxTemperature_K(i,:)-273.15,'-o','LineWidth',1.2,...
+        'DisplayName',sprintf('Object %d - %s %d',...
+        i,assemblyObjects(i).componentType,assemblyObjects(i).componentNumber));
 end
 
-
-axis equal;
-
-
-xlabel('X [m]');
-
-ylabel('Y [m]');
-
-zlabel('Z [m]');
-
-
-title( ...
-    'Phantom Drone - Final Temperature');
-
-
-colorbar;
-
 grid on;
+xlabel('Rotation speed [RPM]');
+ylabel('Maximum temperature [C]');
+title('Maximum Temperature vs RPM');
+legend('Location','eastoutside');
 
-view(3);
-
-
-assemblyFigure = ...
-    fullfile( ...
-    outputFolder, ...
-    'drone_final_temperature.png');
-
-
-exportgraphics( ...
-    gcf, ...
-    assemblyFigure);
-
+rpmFigure = fullfile(outputFolder,'maximum_temperature_vs_RPM.png');
+exportgraphics(gcf,rpmFigure);
 
 %% ================================================================
-% 30. LASER GEOMETRY PLOT
+% 32. PLOT MAXIMUM TEMPERATURE BY MATERIAL VS RPM
 % ================================================================
 
-fprintf( ...
-    'CREATING LASER GEOMETRY PLOT\n');
+materialNames = unique(string({assemblyObjects.material}));
 
-
-figure( ...
-    'Name', ...
-    'Drone and Laser');
-
-
+figure('Name','Maximum Temperature by Material vs RPM');
 hold on;
 
-
-%% ---------------------------------------------------------------
-% Assembly
-% ---------------------------------------------------------------
-
-for i = 1:numObjects
-
-
-    pdegplot( ...
-        assemblyObjects(i).geometry, ...
-        FaceAlpha=0.15);
-
+for m = 1:numel(materialNames)
+    materialMask = string({assemblyObjects.material}) == materialNames(m);
+    materialMax = max(maxTemperature_K(materialMask,:),[],1);
+    plot(rpmSweep,materialMax-273.15,'-o','LineWidth',1.5,...
+        'DisplayName',materialNames(m));
 end
 
-
-%% ---------------------------------------------------------------
-% Laser origin
-% ---------------------------------------------------------------
-
-plot3( ...
-    laserOrigin(1), ...
-    laserOrigin(2), ...
-    laserOrigin(3), ...
-    'o', ...
-    'MarkerSize',10, ...
-    'LineWidth',2);
-
-
-%% ---------------------------------------------------------------
-% Laser target
-% ---------------------------------------------------------------
-
-plot3( ...
-    laserAimPoint(1), ...
-    laserAimPoint(2), ...
-    laserAimPoint(3), ...
-    'x', ...
-    'MarkerSize',12, ...
-    'LineWidth',2);
-
-
-%% ---------------------------------------------------------------
-% Laser beam
-% ---------------------------------------------------------------
-
-plot3( ...
-    [ ...
-    laserOrigin(1), ...
-    laserAimPoint(1) ...
-    ], ...
-    [ ...
-    laserOrigin(2), ...
-    laserAimPoint(2) ...
-    ], ...
-    [ ...
-    laserOrigin(3), ...
-    laserAimPoint(3) ...
-    ], ...
-    'LineWidth',2);
-
-
-axis equal;
-
-
-xlabel('X [m]');
-
-ylabel('Y [m]');
-
-zlabel('Z [m]');
-
-
-title( ...
-    'Drone Assembly and Laser');
-
-
-legend( ...
-    'Assembly', ...
-    'Laser Origin', ...
-    'Laser Aim Point', ...
-    'Laser Beam', ...
-    'Location','best');
-
-
 grid on;
+xlabel('Rotation speed [RPM]');
+ylabel('Maximum temperature [C]');
+title('Maximum Temperature by Material vs RPM');
+legend('Location','best');
 
-view(3);
-
-
-laserFigure = ...
-    fullfile( ...
-    outputFolder, ...
-    'laser_geometry.png');
-
-
-exportgraphics( ...
-    gcf, ...
-    laserFigure);
-
+materialFigure = fullfile(outputFolder,'maximum_temperature_by_material_vs_RPM.png');
+exportgraphics(gcf,materialFigure);
 
 %% ================================================================
-% 31. SAVE CSV
+% 33. SAVE CSV
 % ================================================================
 
-summaryFile = ...
-    fullfile( ...
-    outputFolder, ...
-    'thermal_summary.csv');
-
-
-writetable( ...
-    summaryTable, ...
-    summaryFile);
-
+summaryFile = fullfile(outputFolder,'thermal_RPM_sweep_summary.csv');
+writetable(summaryTable,summaryFile);
 
 %% ================================================================
-% 32. SAVE MATLAB DATA
+% 34. SAVE MATLAB DATA
 % ================================================================
 
-matFile = ...
-    fullfile( ...
-    outputFolder, ...
-    'thermal_results.mat');
+matFile = fullfile(outputFolder,'thermal_RPM_sweep_results.mat');
 
-
-save( ...
-    matFile, ...
-    'results', ...
-    'models', ...
-    'assemblyObjects', ...
-    'summaryTable', ...
-    'laserOrigin', ...
-    'laserAimPoint', ...
-    'laserDirection', ...
-    'laserTarget', ...
-    'laser_offset_x', ...
-    'laser_offset_y', ...
-    'laser_offset_z', ...
-    'rotationRate_deg_s');
-
+save(matFile,...
+    'results','models','assemblyObjects','summaryTable',...
+    'rpmSweep','frequencySweep_Hz','omegaSweep_rad_s',...
+    'maxTemperature_K','finalTemperature_K',...
+    'finalAverageTemperature_K','timeOfMaximum_s',...
+    'maxLaserPower_W','totalLaserEnergy_J',...
+    'averageConvection_W_m2K','terminationReason',...
+    'timeHistories','maxTemperatureHistories_K','laserPowerHistories_W',...
+    'meshHmaxUsed','meshHminUsed',...
+    'laserOrigin','laserAimPoint','laserDirection','laserTarget',...
+    'laser_offset_x','laser_offset_y','laser_offset_z',...
+    't_final','dt');
 
 %% ================================================================
-% 33. FINAL OUTPUT
+% 35. FINAL OUTPUT
 % ================================================================
 
 fprintf('\n');
 fprintf('============================================================\n');
 fprintf('SIMULATION COMPLETE\n');
 fprintf('============================================================\n');
-
-
-fprintf('\n');
-
-
-fprintf( ...
-    'Output folder:\n%s\n', ...
-    outputFolder);
-
-
-fprintf('\n');
-
-
-fprintf( ...
-    'Laser target: %s\n', ...
-    laserTarget);
-
-
-fprintf( ...
-    'Laser spillover: %.3f %%\n', ...
-    100*LASER_SPILLOVER_FRACTION);
-
-
-fprintf( ...
-    'Rotation rate: %.3f deg/s\n', ...
-    rotationRate_deg_s);
-
-
-fprintf('\n');
-
-
-fprintf( ...
-    'Laser origin:\n');
-
-
-fprintf( ...
-    '[%.6f %.6f %.6f] m\n', ...
-    laserOrigin);
-
-
-fprintf('\n');
-
-
-fprintf( ...
-    'Laser aim point:\n');
-
-
-fprintf( ...
-    '[%.6f %.6f %.6f] m\n', ...
-    laserAimPoint);
-
-
-fprintf('\n');
-
-
-fprintf( ...
-    'Results saved to:\n%s\n', ...
-    matFile);
-
-
-fprintf('\n');
-
-
+fprintf('RPM sweep: 0 to 60 RPM in 10 RPM increments\n');
+fprintf('Time step: %.3f s\n',dt);
+fprintf('Final time: %.1f s\n',t_final);
+fprintf('Output folder:\n%s\n',outputFolder);
+fprintf('CSV:\n%s\n',summaryFile);
+fprintf('MAT:\n%s\n',matFile);
+fprintf('RPM plot:\n%s\n',rpmFigure);
+fprintf('Material plot:\n%s\n',materialFigure);
 fprintf('============================================================\n');
 
 
-%% =================================================================
-% LOCAL FUNCTION:
-% DETERMINE LASER TARGET
-% =================================================================
 
 function tf = ...
     isTargetComponent(component,target)
@@ -2350,169 +2002,169 @@ end
 
 %% =================================================================
 % LOCAL FUNCTION:
-% LASER HEAT FLUX
+% ROTATING CIRCULAR LASER HEAT FLUX
 % =================================================================
 
-function q = ...
-    laserHeatFlux( ...
+function q = laserHeatFluxCircular(...
     location, ...
     state, ...
-    laserOrigin, ...
-    laserDirection, ...
+    box_centroid, ...
+    trajectory_radius, ...
+    omega_z, ...
+    theta_0, ...
+    laser_origin_world, ...
     P0, ...
-    alpha, ...
-    w0, ...
-    zR, ...
-    laserScale)
+    ALPHA_ATM, ...
+    WAVELENGTH, ...
+    D, ...
+    M2, ...
+    absorptivity)
+
+    % Get evaluation time safely.
+    if isempty(state) || ...
+            ~isfield(state,"time") || ...
+            isempty(state.time)
+        t = 0;
+    else
+        t = state.time;
+    end
+
+    % During FEM setup MATLAB may request the boundary condition with
+    % an undefined time. Return NaN in that case, matching the behavior
+    % expected by a time-dependent thermal boundary condition.
+    if any(isnan(t(:)))
+        q = NaN(size(location.x));
+        return;
+    end
+
+    % Rotating target point.
+    theta = theta_0 + omega_z .* t;
+
+    target = [ ...
+        box_centroid(1) + trajectory_radius .* cos(theta); ...
+        box_centroid(2) + trajectory_radius .* sin(theta); ...
+        box_centroid(3)];
+
+    % Laser direction from source to moving target.
+    laser_direction = target - laser_origin_world;
+    range = norm(laser_direction);
+
+    if range < 1e-12
+        q = zeros(size(location.x));
+        return;
+    end
+
+    laser_direction = laser_direction ./ range;
+
+    % Gaussian beam parameters, using the same definitions as the
+    % transient source script.
+    w0 = D ./ (pi .* M2);
+    zR = pi .* w0.^2 ./ (M2 .* WAVELENGTH);
+    w = w0 .* sqrt(1 + (range ./ max(zR,eps)).^2);
+
+    % Atmospheric attenuation.
+    I0 = P0 .* exp(-ALPHA_ATM .* range);
+
+    % Evaluation locations.
+    x = location.x(:);
+    y = location.y(:);
+    z = location.z(:);
+    xyz = [x,y,z];
+
+    % Coordinates relative to the instantaneous laser target.
+    relative = xyz - target.';
+
+    % Construct a transverse basis perpendicular to the laser direction.
+    referenceVector = [0;0;1];
+    if abs(dot(referenceVector,laser_direction)) > 0.95
+        referenceVector = [0;1;0];
+    end
+
+    e1 = cross(laser_direction,referenceVector);
+    e1 = e1 ./ max(norm(e1),1e-12);
+
+    e2 = cross(laser_direction,e1);
+    e2 = e2 ./ max(norm(e2),1e-12);
+
+    X = relative * e1;
+    Y = relative * e2;
+    r2 = X.^2 + Y.^2;
+
+    % Gaussian intensity.
+    I = (2 .* I0 ./ (pi .* w.^2)) .* exp(-2 .* r2 ./ w.^2);
+
+    % Absorbed surface heat flux.
+    q = absorptivity .* I;
+    q = reshape(q,size(location.x));
+end
 
 
-% ================================================================
-% IMPORTANT MATLAB FEM REQUIREMENT:
-%
-% Boundary-condition functions must return a 1 x N vector.
-%
-% This function therefore explicitly converts q to a ROW VECTOR
-% at the end.
-% ================================================================
+%% =================================================================
+% LOCAL FUNCTION:
+% ROTATIONAL CONVECTION COEFFICIENT
+% =================================================================
+
+function h = convectionCoefficientRotation(...
+    location, ...
+    omega_z, ...
+    box_centroid, ...
+    air_density, ...
+    air_viscosity, ...
+    air_conductivity, ...
+    air_prandtl, ...
+    L_characteristic, ...
+    h_free)
+
+    x = location.x;
+    y = location.y;
+
+    r = sqrt((x - box_centroid(1)).^2 + ...
+             (y - box_centroid(2)).^2);
+
+    velocity = abs(omega_z) .* r;
+
+    Re = air_density .* velocity .* L_characteristic ./ air_viscosity;
+    Re = max(Re,1);
+
+    Nu = 0.664 .* sqrt(Re) .* air_prandtl.^(1/3);
+
+    turbulent = Re >= 5e5;
+    Nu(turbulent) = ...
+        (0.037 .* Re(turbulent).^0.8 - 871) .* air_prandtl.^(1/3);
+
+    h_forced = Nu .* air_conductivity ./ L_characteristic;
+
+    h = h_free + h_forced;
+    h = max(h,1e-6);
+end
 
 
-%% ---------------------------------------------------------------
-% Number of evaluation points
-% ---------------------------------------------------------------
+%% =================================================================
+% LOCAL FUNCTION:
+% INTERPOLATE PREVIOUS TEMPERATURE
+% =================================================================
 
-n = ...
-    numel(location.x);
+function T_initial = interpolatePreviousTemperature(...
+    location, ...
+    previousNodes, ...
+    previousTemperature)
 
+    previousNodes = previousNodes';
 
-%% ---------------------------------------------------------------
-% Coordinates
-% ---------------------------------------------------------------
+    xq = location.x(:);
+    yq = location.y(:);
+    zq = location.z(:);
 
-x = ...
-    location.x(:);
+    F = scatteredInterpolant(...
+        previousNodes(:,1), ...
+        previousNodes(:,2), ...
+        previousNodes(:,3), ...
+        previousTemperature(:), ...
+        "linear", ...
+        "nearest");
 
-
-y = ...
-    location.y(:);
-
-
-zCoord = ...
-    location.z(:);
-
-
-P = ...
-    [ ...
-    x, ...
-    y, ...
-    zCoord ...
-    ];
-
-
-%% ---------------------------------------------------------------
-% Position relative to laser origin
-% ---------------------------------------------------------------
-
-R = ...
-    P - laserOrigin;
-
-
-%% ---------------------------------------------------------------
-% Distance along beam
-% ---------------------------------------------------------------
-
-zBeam = ...
-    R * ...
-    laserDirection(:);
-
-
-%% ---------------------------------------------------------------
-% Perpendicular distance
-% ---------------------------------------------------------------
-
-perpendicular = ...
-    R - ...
-    zBeam .* ...
-    laserDirection;
-
-
-r = ...
-    sqrt( ...
-    sum( ...
-    perpendicular.^2, ...
-    2));
-
-
-%% ---------------------------------------------------------------
-% Beam radius
-% ---------------------------------------------------------------
-
-w = ...
-    w0 .* ...
-    sqrt( ...
-    1 + ...
-    (zBeam ./ ...
-    max(zR,eps)).^2);
-
-
-%% ---------------------------------------------------------------
-% Gaussian irradiance
-% ---------------------------------------------------------------
-
-I = ...
-    (2 .* P0) ./ ...
-    (pi .* w.^2) .* ...
-    exp( ...
-    -2 .* r.^2 ./ ...
-    max(w.^2,eps));
-
-
-%% ---------------------------------------------------------------
-% Atmospheric attenuation
-% ---------------------------------------------------------------
-
-I = ...
-    I .* ...
-    exp( ...
-    -alpha .* ...
-    max(zBeam,0));
-
-
-%% ---------------------------------------------------------------
-% Initialize heat flux
-% ---------------------------------------------------------------
-
-q = ...
-    zeros(n,1);
-
-
-%% ---------------------------------------------------------------
-% Only illuminate points in front of laser
-% ---------------------------------------------------------------
-
-valid = ...
-    zBeam >= 0;
-
-
-q(valid) = ...
-    laserScale .* ...
-    I(valid);
-
-
-%% ================================================================
-% CRITICAL FIX:
-%
-% Return 1 x N instead of N x 1.
-%
-% This prevents MATLAB from creating an N x N matrix when the
-% laser heat flux is combined with convection and radiation.
-% ================================================================
-
-q = ...
-    reshape(q,1,[]);
-
-
-% State is intentionally unused.
-
+    T_initial = F(xq,yq,zq);
+    T_initial = reshape(T_initial,size(location.x));
 end
 
 
