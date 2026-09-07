@@ -21,7 +21,7 @@ clc;
 close all;
 
 %% USER CONTROLS
-STEP_FILE = "C:\Users\jonat\Downloads\Skydio_x10_model.step"; % relative pathway
+STEP_FILE = "Skydio_x10_model.step"; % relative pathway
 
 % HEAT-LOSS TOGGLES
 % Set either value to true/false to independently enable or disable
