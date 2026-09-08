@@ -24,7 +24,7 @@ The basic research question is as follows:
 
 The general methodology is to create a representation of the drone test-bed in Gazebo, then transfer the exact setup into a physical environmnet. Then, using basic circuitry and computer vision, the physical tests will be overlapped with the simulation tests to guide drone development. 
 
-# Setup
+# Setup for Single Drone-Test
 The setup is as follows. In the first terminal, after having cloned PX4-Autopilot, configured a pathway to the *drone_obstacle_course.sdf*, imported *gazebo_box.STL* and *gazebo_flag.STL*:
 
 *Terminal 1*
@@ -79,3 +79,26 @@ python drone_tests.py 1
 The last line *python drone_tests.py 1* uses an integer as the last argument, to carry out test 2 or 3, replace the 1 with the respective test. 
 
 
+# Setup for Swarm Drone-Test
+One needs *gnome-terminal* in order to easily intsantiate multiple drones for the swarm within the world. After that has been setup and the "run_drone_swarm.bash" has been downloaded with the appropriate paths, in one terminal run the following, with the integer serving as the number of drones to be instantiated (it has been tested up to 8 drones).
+
+*Terminal 1*
+```bash
+chmod +x run_drone_swarm.bash
+
+./run_drone_swarm.bash 8
+```
+
+Give the swarm time to generate (it will take roughly a minute). Then, in another terminal run the following with the integers between the two matching:
+
+*Terminal 2*
+```bash
+python3 drone_test_swarms.py --n 8
+```
+
+As an aside, sometimes there are artificats of other simulation which cause the drone swarm to not instantiate in a Gazebo world, simply enter the following commands into terminal:
+
+```bash
+pkill -f px4
+pkill -f "gz sim"
+```
