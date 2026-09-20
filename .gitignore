@@ -1,0 +1,27 @@
+# ROS 2 / COLCON
+build/
+install/
+log/
+
+# PYTHON
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+swarm_venv/
+mavlink_venv/
+
+# PX4 GENERATED / RUNTIME FILES
+*.ulg
+*.tlog
+*.tlog.raw
+
+# EDITORS / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
