@@ -1,0 +1,377 @@
+! ================================================================
+! ROTATING DRONE - MOVING GAUSSIAN LASER HEAT FLUX
+! ================================================================
+
+
+/CLEAR
+/FILNAME,ROTATING_DRONE_LASER
+
+! PARAMETERS
+
+! DRONE / LASER GEOMETRY
+
+DRONE_HEIGHT = 80
+
+ENGAGE_RANGE  = 500
+
+! Horizontal distance to drone centroid
+DRONE_X = SQRT(ENGAGE_RANGE**2 - DRONE_HEIGHT**2)
+
+DRONE_Y = 0
+DRONE_Z = DRONE_HEIGHT
+
+! DRONE ROTATION
+
+ROT_DEG_S = 360
+
+ROT_RAD_S = ROT_DEG_S * 3.14159265358979 / 180
+
+
+! SIMULATION
+
+SIM_TIME = 15.0
+
+DT = .015
+
+NT = SIM_TIME / DT
+
+
+! LASER
+
+LASER_POWER = 30000
+
+ABSORPTIVITY = 1.0
+
+WAVELENGTH = 1.064E-6
+
+M2 = 1.1
+
+INPUT_DIAMETER = 0.40
+
+! GAUSSIAN BEAM PARAMETERS
+
+! MATLAB:
+!
+! w0 = D / (pi*M2)
+!
+W0 = INPUT_DIAMETER / (3.14159265358979*M2)
+
+
+! MATLAB:
+!
+! zR = pi*w0^2/(M2*wavelength)
+!
+ZR = 3.14159265358979*W0**2/(M2*WAVELENGTH)
+
+
+! Beam radius at target
+!
+WTARGET = W0*SQRT(1+(ENGAGE_RANGE/ZR)**2)
+
+
+! Peak Gaussian intensity:
+!
+! I(r) = I0*exp(-2*r^2/w^2)
+!
+! I0 = 2P/(pi*w^2)
+!
+PEAK_INTENSITY = 2*LASER_POWER / &
+                 (3.14159265358979*WTARGET**2)
+
+
+PEAK_FLUX = ABSORPTIVITY*PEAK_INTENSITY
+
+! PRINT LASER INFORMATION
+
+*STATUS,PARM
+
+/COM, ================================================
+/COM, ROTATING DRONE LASER
+/COM, ================================================
+/COM, Drone X position:
+*VWRITE,DRONE_X
+('DRONE_X = ',E16.8)
+
+/COM, Drone Z position:
+*VWRITE,DRONE_Z
+('DRONE_Z = ',E16.8)
+
+/COM, Rotation rate:
+*VWRITE,ROT_DEG_S
+('ROTATION = ',F12.4,' deg/s')
+
+/COM, Beam waist radius:
+*VWRITE,W0
+('W0 = ',E16.8,' m')
+
+/COM, Rayleigh range:
+*VWRITE,ZR
+('ZR = ',E16.8,' m')
+
+/COM, Target beam radius:
+*VWRITE,WTARGET
+('WTARGET = ',E16.8,' m')
+
+/COM, Peak heat flux:
+*VWRITE,PEAK_FLUX
+('PEAK FLUX = ',E16.8,' W/m^2')
+
+/COM, ================================================
+
+
+! PREPROCESSOR
+
+/PREP7
+
+! ELEMENT TYPE
+
+
+ET,1,SOLID70
+
+
+! MATERIAL - change to match material properties assigned on ansys
+
+MP,KXX,1,167
+MP,C,1,900
+MP,DENS,1,2700
+
+
+! IMPORT / READ DRONE GEOMETRY 
+
+! MESH
+
+
+ESIZE,0.01
+
+VMESH,ALL
+
+
+! SELECT EXTERIOR SURFACE NODES
+
+
+ALLSEL,ALL
+
+NSLA,S,1
+
+CM,LASER_SURFACE,NODE
+
+
+! SAVE NUMBER OF SURFACE NODES
+
+*GET,N_SURF,NODE,0,COUNT
+
+/COM, Number of laser surface nodes:
+*VWRITE,N_SURF
+('N_SURF = ',I10)
+
+
+! GET SURFACE NODE LIST
+
+*DIM,SURF_NODE,ARRAY,N_SURF
+
+NID = 0
+
+*DO,I,1,N_SURF
+
+    NID = NDNEXT(NID)
+
+    SURF_NODE(I) = NID
+
+*ENDDO
+
+! TRANSIENT THERMAL ANALYSIS
+
+FINISH
+
+/SOLU
+
+ANTYPE,TRANS
+
+TRNOPT,FULL
+
+KBC,1
+
+AUTOTS,OFF
+
+DELTIM,DT,DT,DT
+
+OUTRES,ALL,ALL
+
+
+! INITIAL TEMPERATURE
+
+
+TUNIF,27.5
+
+! TIME LOOP
+
+*DO,IT,1,NT
+
+    TIME_NOW = IT*DT
+
+
+    ! DRONE YAW
+
+    YAW = ROT_RAD_S*TIME_NOW
+
+
+    ! LASER WAIST
+
+    RWAIST = 0.20
+
+
+    WAIST_X = DRONE_X + RWAIST*COS(YAW)
+
+    WAIST_Y = DRONE_Y + RWAIST*SIN(YAW)
+
+    WAIST_Z = DRONE_Z
+
+
+    ! BEAM DIRECTION - laser assumed at [0,0,0]
+
+
+    BEAM_X = WAIST_X
+    BEAM_Y = WAIST_Y
+    BEAM_Z = WAIST_Z
+
+
+    BEAM_LENGTH = SQRT( &
+        BEAM_X**2 + &
+        BEAM_Y**2 + &
+        BEAM_Z**2 )
+
+
+    BX = BEAM_X/BEAM_LENGTH
+    BY = BEAM_Y/BEAM_LENGTH
+    BZ = BEAM_Z/BEAM_LENGTH
+
+
+    ! REMOVE PREVIOUS LASER HEAT FLUX
+
+    ALLSEL,ALL
+
+    CMSEL,S,LASER_SURFACE
+
+    BFDELE,ALL,HGEN
+
+    SFDELE,ALL,HFLUX
+
+    ! APPLY GAUSSIAN HEAT FLUX - r is perpendicular distance to node from laser
+
+    *DO,I,1,N_SURF
+
+        NODE_ID = SURF_NODE(I)
+
+        ! NODE POSITION
+
+        *GET,NX,NODE,NODE_ID,LOC,X
+        *GET,NY,NODE,NODE_ID,LOC,Y
+        *GET,NZ,NODE,NODE_ID,LOC,Z
+
+        ! VECTOR FROM LASER SOURCE TO NODE
+
+        VX = NX
+        VY = NY
+        VZ = NZ
+
+
+        ! PROJECTION DISTANCE ALONG LASER BEAM
+
+        PROJ = VX*BX + VY*BY + VZ*BZ
+
+
+        ! Only illuminate the forward beam
+
+        *IF,PROJ,LE,0,THEN
+            *CYCLE
+        *ENDIF
+
+
+        ! CLOSEST POINT ON BEAM CENTERLINE
+
+        CX = PROJ*BX
+        CY = PROJ*BY
+        CZ = PROJ*BZ
+
+        ! DISTANCE FROM NODE TO LASER CENTERLINE
+
+        DX = NX-CX
+        DY = NY-CY
+        DZ = NZ-CZ
+
+
+        RADIAL_DISTANCE = SQRT( &
+            DX**2 + &
+            DY**2 + &
+            DZ**2 )
+
+
+        ! GAUSSIAN HEAT FLUX
+
+        GAUSS_FACTOR = EXP( &
+            -2*RADIAL_DISTANCE**2 / &
+            WTARGET**2 )
+
+
+        LOCAL_FLUX = PEAK_FLUX*GAUSS_FACTOR
+
+
+        ! --------------------------------------------------------
+        ! APPLY HEAT FLUX
+        ! --------------------------------------------------------
+
+        *IF,LOCAL_FLUX,GT,1.0E-6,THEN
+
+            SF,NODE_ID,HFLUX,LOCAL_FLUX
+
+        *ENDIF
+
+
+    *ENDDO
+
+    ! SOLVE THIS TIME STEP
+
+    TIME,TIME_NOW
+
+    ALLSEL,ALL
+
+    SOLVE
+
+
+    ! OUTPUT
+    /POST1
+
+    SET,LAST
+
+    ! Maximum temperature
+    *GET,TMAX,NODE,0,MAX,TEMP
+
+
+    /COM, --------------------------------------------
+    *VWRITE,TIME_NOW,TMAX
+    ('TIME = ',F12.4,'   TMAX = ',F12.4,' C')
+    /COM, --------------------------------------------
+
+
+    FINISH
+
+    /SOLU
+
+*ENDDO
+
+
+! END
+
+FINISH
+
+
+/POST1
+
+SET,LAST
+
+PLNSOL,TEMP
+
+/EDGE,1,1
+
+/SHOW,CLOSE
+
