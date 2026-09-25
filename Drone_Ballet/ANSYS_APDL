@@ -1,0 +1,419 @@
+! Moving Drone + Stationary Laser; results in drone-induced convection, and hopefully a longer and happier life for the drone!
+
+! USER INPUTS
+
+! Time
+TEND = 30.0
+DT   = 0.01
+
+
+! Rotation (360 - will likely be the upper bound for our case)
+ROT_DEG_S = 360.0
+
+
+! Laser (changes on a laser by laser basis, this is what we are using for parameters now)
+P0      = 5000.0
+LAM     = 1064E-9
+BEAM_D  = 0.10
+M2FAC   = 1.5
+ABSORB  = 1.0
+
+! Atmospheric attenuation (statistical model, this provides a bounded value)
+ALPHA_ATM = 1.65E-4
+
+
+! Source-to-drone geometry (slant represents total distance of drone from laser, and DH is the height of the drone off of the ground)
+SLANT = 500.0
+DH    = 200.0
+
+
+! Gaussian cutoff
+NCUT = 3.0
+
+
+! Air (defining air properties)
+TAMB   = 27.0
+RHOAIR = 1.184
+MUAIR  = 1.849E-5
+KAIR   = 0.0263
+PRAIR  = 0.707
+
+
+! Natural convection baseline (worst case this would be 0)
+HFREE = 10.0
+
+
+! Physical characteristic length of drone body (not really used, artifact from Matlab script)
+LCHAR = 0.05
+
+
+! ANSYS element type numbers
+! Current model:
+! 1 = SOLID291
+! 2 = SURF152
+
+SOLIDTYPE = 1
+CONVTYPE  = 2
+
+
+! BASIC VALUES
+PI = ACOS(-1.0)
+
+*AFUN,RAD
+
+OMEGA = ROT_DEG_S*PI/180.0
+
+FREQ = ROT_DEG_S/360.0
+
+NTIME = NINT(TEND/DT)+1
+
+
+! LASER GEOMETRY
+HORIZ = SQRT(SLANT**2-DH**2)
+
+COS_ELEV = HORIZ/SLANT
+
+SIN_ELEV = DH/SLANT
+
+
+! GAUSSIAN BEAM (derived from John Miller's work)
+W0 = BEAM_D/(PI*M2FAC)
+
+ZR = PI*W0**2/(M2FAC*LAM)
+
+WBEAM = W0*SQRT(1.0+(SLANT/ZR)**2)
+
+PTARGET = P0*EXP(-ALPHA_ATM*SLANT)
+
+QPEAK = ABSORB*2.0*PTARGET/(PI*WBEAM**2)
+
+RCUT = NCUT*WBEAM
+
+RCUT2 = RCUT**2
+
+! LASER PATH (two real strategems, one moves along the centroid of the drone as it rotates, the second falls a specific component of the drone (e.g. rotor arm))
+ALLSEL,ALL
+
+CMSEL,S,LASER_PATH
+
+*GET,NPATH,NODE,0,COUNT
+
+*GET,XMINP,NODE,0,MNLOC,X
+*GET,XMAXP,NODE,0,MXLOC,X
+
+*GET,YMINP,NODE,0,MNLOC,Y
+*GET,YMAXP,NODE,0,MXLOC,Y
+
+*GET,ZMINP,NODE,0,MNLOC,Z
+*GET,ZMAXP,NODE,0,MXLOC,Z
+
+
+! Rotation axis
+
+XCEN = (XMINP+XMAXP)/2.0
+YCEN = (YMINP+YMAXP)/2.0
+ZCEN = (ZMINP+ZMAXP)/2.0
+
+! SAVE PATH DATA
+*DIM,NODEID,ARRAY,NPATH
+*DIM,YPATH,ARRAY,NPATH
+*DIM,RPATH,ARRAY,NPATH
+*DIM,APATH,ARRAY,NPATH
+
+*DIM,QPATH,TABLE,NTIME,NPATH,1,TIME,NODE
+
+
+CMSEL,S,LASER_PATH
+
+*GET,NID,NODE,0,NUM,MIN
+
+
+*DO,J,1,NPATH
+
+    NODEID(J) = NID
+
+    *GET,XN,NODE,NID,LOC,X
+    *GET,YN,NODE,NID,LOC,Y
+    *GET,ZN,NODE,NID,LOC,Z
+
+    DX = XN-XCEN
+    DZ = ZN-ZCEN
+
+    RLOC = SQRT(DX**2+DZ**2)
+
+    YPATH(J) = YN
+    RPATH(J) = RLOC
+
+    *IF,RLOC,GT,1.0E-12,THEN
+
+        APATH(J) = ATAN2(DZ,DX)
+
+    *ELSE
+
+        APATH(J) = 0.0
+
+    *ENDIF
+
+    QPATH(0,J) = NID
+
+    NID = NDNEXT(NID)
+
+*ENDDO
+
+
+! BUILD MOVING LASER
+QTABLEMAX = 0.0
+
+
+*DO,I,1,NTIME
+
+    TCUR = (I-1)*DT
+
+    *IF,I,EQ,NTIME,THEN
+        TCUR = TEND
+    *ENDIF
+
+    QPATH(I,0) = TCUR
+
+    THBEAM = OMEGA*TCUR
+
+
+    *DO,J,1,NPATH
+
+        THNODE = APATH(J)
+
+        DTHETA = ATAN2( SIN(THNODE-THBEAM), COS(THNODE-THBEAM) )
+
+        STAN = RPATH(J)*DTHETA
+
+        DY = YPATH(J)-YCEN
+
+
+        ! Projected elliptical Gaussian
+
+        DIST2 = STAN**2 + (COS_ELEV*DY)**2
+
+
+        *IF,DIST2,LE,RCUT2,THEN
+
+            QLAS = QPEAK*EXP(-2.0*DIST2/WBEAM**2)
+
+        *ELSE
+
+            QLAS = 0.0
+
+        *ENDIF
+
+
+        QPATH(I,J) = QLAS
+
+
+        *IF,QLAS,GT,QTABLEMAX,THEN
+            QTABLEMAX = QLAS
+        *ENDIF
+
+    *ENDDO
+
+*ENDDO
+
+
+! APPLY LASER
+ALLSEL,ALL
+
+CMSEL,S,LASER_PATH
+
+ESEL,S,TYPE,,SOLIDTYPE
+
+SFDELE,ALL,HFLUX
+
+SF,ALL,HFLUX,%QPATH%
+
+ALLSEL,ALL
+
+
+! ROTATIONAL CONVECTION
+ESEL,S,TYPE,,CONVTYPE
+
+*GET,NCONV,ELEM,0,COUNT
+
+*GET,EID,ELEM,0,NUM,MIN
+
+
+HMIN = 1.0E30
+HMAX = 0.0
+HSUM = 0.0
+
+VMIN = 1.0E30
+VMAX = 0.0
+
+REMIN = 1.0E30
+REMAX = 0.0
+
+
+
+*DO,K,1,NCONV
+
+    ! Surface location
+
+    *GET,XE,ELEM,EID,CENT,X
+    *GET,ZE,ELEM,EID,CENT,Z
+
+
+    ! Radius from Y axis
+
+    DX = XE-XCEN
+    DZ = ZE-ZCEN
+
+    RLOCAL = SQRT(DX**2+DZ**2)
+
+
+    ! Tangential speed
+
+    VLOCAL = ABS(OMEGA)*RLOCAL
+
+
+    ! Reynolds number
+
+    RE = RHOAIR*VLOCAL*LCHAR/MUAIR
+
+    *IF,RE,LT,1.0,THEN
+        RE = 1.0
+    *ENDIF
+
+
+    ! Nusselt number
+
+    *IF,RE,LT,5.0E5,THEN
+
+        NU = 0.664*SQRT(RE)*PRAIR**(1.0/3.0)
+
+    *ELSE
+
+        NU = (0.037*RE**0.8-871.0)*PRAIR**(1.0/3.0)
+
+        *IF,NU,LT,0.0,THEN
+            NU = 0.0
+        *ENDIF
+
+    *ENDIF
+
+
+    ! Convection coefficient
+
+    HFORCED = NU*KAIR/LCHAR
+
+    HLOCAL = HFREE+HFORCED
+
+
+    ! Apply h
+
+    SFE,EID,1,CONV,0,HLOCAL
+
+
+    ! Ambient temperature
+
+    SFE,EID,1,CONV,2,TAMB
+
+
+    ! Statistics
+
+    HSUM = HSUM+HLOCAL
+
+    *IF,HLOCAL,LT,HMIN,THEN
+        HMIN = HLOCAL
+    *ENDIF
+
+    *IF,HLOCAL,GT,HMAX,THEN
+        HMAX = HLOCAL
+    *ENDIF
+
+    *IF,VLOCAL,LT,VMIN,THEN
+        VMIN = VLOCAL
+    *ENDIF
+
+    *IF,VLOCAL,GT,VMAX,THEN
+        VMAX = VLOCAL
+    *ENDIF
+
+    *IF,RE,LT,REMIN,THEN
+        REMIN = RE
+    *ENDIF
+
+    *IF,RE,GT,REMAX,THEN
+        REMAX = RE
+    *ENDIF
+
+
+    EID = ELNEXT(EID)
+
+*ENDDO
+
+
+! CONVECTION AVERAGE
+*IF,NCONV,GT,0,THEN
+
+    HAVG = HSUM/NCONV
+
+*ELSE
+
+    HAVG = 0.0
+
+*ENDIF
+
+
+ALLSEL,ALL
+
+
+
+! OUTPUT
+/COM, ========================================================
+/COM, USER SETTINGS
+/COM, ========================================================
+
+*VWRITE,TEND,DT
+(' TEND / DT = ',2E16.8)
+
+*VWRITE,ROT_DEG_S,FREQ,OMEGA
+(' DEG/S / HZ / OMEGA = ',3E16.8)
+
+
+/COM, ========================================================
+/COM, LASER
+/COM, ========================================================
+
+*VWRITE,P0,PTARGET
+(' P0 / TARGET POWER = ',2E16.8)
+
+*VWRITE,SLANT,DH,HORIZ
+(' SLANT / HEIGHT / HORIZONTAL = ',3E16.8)
+
+*VWRITE,W0,ZR,WBEAM
+(' W0 / ZR / W = ',3E16.8)
+
+*VWRITE,QPEAK,QTABLEMAX
+(' QPEAK / TABLE MAX = ',2E16.8)
+
+*VWRITE,COS_ELEV,SIN_ELEV
+(' COS ELEV / SIN ELEV = ',2E16.8)
+
+
+/COM, ========================================================
+/COM, CONVECTION
+/COM, ========================================================
+
+*VWRITE,LCHAR
+(' CHARACTERISTIC LENGTH = ',E16.8)
+
+*VWRITE,VMIN,VMAX
+(' VELOCITY MIN / MAX = ',2E16.8)
+
+*VWRITE,REMIN,REMAX
+(' RE MIN / MAX = ',2E16.8)
+
+*VWRITE,HMIN,HAVG,HMAX
+(' H MIN / AVG / MAX = ',3E16.8)
+
+
+/COM, ========================================================
+/COM, END
+/COM, ========================================================
