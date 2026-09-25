@@ -23,6 +23,26 @@ With **"mitigate"** defined as **"the increase of dwell time needed to render th
 
 # Methodology
 
-The general methodology is to create a representation of the drone with realistic material composition (mainly using a quadcopter base), then simulate via MATLAB (and its respective PDE solver) the effects of the laser's irradiance pattern with some degree of stochasticity.
+The general methodology is to create a representation of the drone with realistic material composition (mainly using a quadcopter base), then simulate via ANSYS the effect of the laser's irradiance pattern with varying degrees of stochasticity. Then, iterating over rotation rates, determine system degradation and failure modes with tabulated material properties. 
 
-Then, iterating over rotation rates, determine the energy irradiated on each component of the drone and cross-check that with material degradation properties.
+# Failure Modes
+1) **Full Penetration**: Point at which inner layer of the hull >= melting point of the material
+2) **Mechanical Deformation of Aerodynamic Supporting Structure**: Significant change in angle of the support arm - with exact number yet to be determined
+3) **Destruction of Motor**: Temperature of the motor above some threshold - e.g. Aluminum melting point or >= specification sheet operating temperature
+4) **Thermal Runaway**: 
+* 1 Casing/housing of the drone battery reaches a critical temperature such that the battery failes
+* 2 Overheating of the electronics enclosure, such that the minimum temperature threshold of any component is surpassed
+5) **Internal Overheating of Thermal Load Bearing**: Minimum temperature threshold of any component is surpassed in the hull of the drone
+
+# ANSYS Setup
+Firstly, define two modules: Transient Thermal and Static Structural (or Transient Structural), with the Engineering Data, Geometry, and Solution from Transient Thermal serving as inputs into the Static Structural module.
+
+Then, define the specific material properties for the system of interest (e.g. Carbon-Fiber), making sure to add thermal properties for orthotropic thermal conductivity and specific heat.
+
+Assign the relevant materials to each body of the drone. Then, for use with our particular APDL script, define two named-selections: LASER_PATH is defined as the faces on which the laser will be traveling; DRONE_EXTERNAL is defined as all surface faces, such that convection correlations can be used. Then, mesh the drone, I found the default settings worked well, but future work could look into finer meshes along discontinuities (especially in inorganic drone models). 
+
+Then, in the Transient Thermal module, underneath "Analysis Settings" define the Step End Time (in our case I used 30s), make sure that Auto Time Stepping is toggled to "Off", and that Time Integration is toggled to "On". I found empirically that a time-step of .01 s worked very well, but for higher fidelity models, one could use a <.01 s time-step. 
+
+Right click the "Transient Thermal" module in ANSYS Mechanical, and add a command. Then, copy the APDL script provided in the repo. and place it in the provided dropdown. Then, solve the Transient Thermal response. 
+
+Then, add a constraint to the Static/Transient Structural structural module, I added a fixed support along the bottom of the drone, but fixed supports about the motors could also be relevant. Then, match the step-end time to that of the Transient Thermal, and use 1 step (for "Number of Steps"). Then, solve the module
