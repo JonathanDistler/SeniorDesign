@@ -1,65 +1,43 @@
 
+     
 ! =====================================================================
-! ANSYS MECHANICAL - TRANSIENT THERMAL COMMANDS (APDL)
+! ANSYS MECHANICAL COMMANDS - TRANSIENT THERMAL
+! INITIAL TEMPERATURE = 27 C (INITIAL CONDITION ONLY, NOT FIXED)
+! ROTATING DRONE / STATIONARY LASER / NATURAL CONVECTION
 !
-! ROTATING DRONE / STATIONARY LASER
-! TEMPERATURE-DEPENDENT NATURAL CONVECTION
-! QUADRATIC THERMAL ELEMENT STABILIZATION
+! Model: existing Workbench mesh and Engineering Data properties.
+! Units: m, kg, s, W, C.
 !
-! Initial drone temperature: 27 C
-! Ambient air temperature: 27 C
-! Laser power: 5000 W
-! Simulated drone rotation: 60 deg/s about global Y
-! Simulation duration: 15 seconds
+! REQUIRED NODAL COMPONENTS (FACE-BASED NAMED SELECTIONS):
+!   LASER_PATH    - complete external faces eligible for laser heating
+!   EXPOSED_SURF  - all external faces that see ambient air
 !
-! Model units: meters, kilograms, seconds, watts, Celsius.
+! This snippet MUST NOT be accompanied by duplicate native convection
+! or native heat-flux loads on the same faces. Do not add SOLVE.
 !
-! REQUIRED NODE NAMED SELECTIONS:
-!   LASER_PATH   - Exterior laser-loaded surface nodes
-!   EXPOSED_SURF - All exterior nodes exposed to air
+! Surface loading strategy:
+! - Moving laser HFLUX is applied to the SOLID291 faces.
+! - Natural convection acts on separate, overlaid SURF152 elements.
+! This permits both physical effects at the same surface WITHOUT
+! prescribing, resetting, or clamping temperatures.
 !
-! The mesh does not physically rotate.
-! Rotation is simulated by moving the heat-flux footprint.
-!
-! Convection uses a Churchill-Chu vertical-plate correlation.
-! Convection is excluded from LASER_PATH faces.
-!
-! No radiation is added by this script.
-!
-! Set Step End Time = TEND in Mechanical.
-! Do not add SOLVE; Workbench performs the solve.
+! Intended for existing SOLID291 (10-node tetrahedral thermal) mesh,
+! as identified in the 2026-10-27 solver log.
 ! =====================================================================
 
-
-! =====================================================================
-! 1. USER SETTINGS
-! =====================================================================
-
+! --------------------- USER PARAMETERS -------------------------------
 TINIT           = 27.0
 TAMB            = 27.0
-
-! Simulation time
 TEND            = 15.0
 DT              = 0.01
 
-! Drone rotation
-ROT_DEG_S       = 60.0
+ROT_DEG_S       = 0.0
 ROT_DELAY       = 0.50
-
-! Laser activation
 LASER_START     = 0.0
 LASER_RAMP      = 0.10
-
-! Laser location
-LASER_Y_OFFSET  = 0.005
-
-! Laser switch
+LASER_Y_OFFSET  = 0.0
 USE_LASER       = 1
-
-
-! =====================================================================
-! 2. LASER PARAMETERS
-! =====================================================================
+USE_CONV        = 0 ! boolean 0 off, 1 on
 
 P0              = 5000.0
 ALPHA_ATM       = 0.00015
@@ -67,860 +45,320 @@ LAM             = 1064E-9
 BEAM_D          = 0.10
 M2FAC           = 1.5
 ABSORB          = 1.0
-
-! Propagation geometry
 SLANT           = 500.0
 DH              = 200.0
 NCUT            = 3.0
-
-! Pattern orientation
 PATTERN_YAW_DEG = 0.0
-
 XSHIFT          = 0.0
 YSHIFT          = 0.0
 
-
-! =====================================================================
-! 3. CONVECTION SETTINGS
-! =====================================================================
-
-! Natural convection is enabled
-USE_CONV        = 1
-
-! Gravitational acceleration
 GRAV            = 9.81
-
-! Ambient air
 PAMB            = 101325.0
 RGAS            = 287.05
 CPAIR           = 1006.0
-
-! Reference properties at 300 K
 TREF_AIR        = 300.0
 MU_REF          = 1.846E-5
 K_REF           = 0.0263
-
-! Sutherland constant
 SUTH            = 110.4
-
-! Characteristic length
-!
-! AUTO_LCHAR = 1:
-! Estimate length from EXPOSED_SURF vertical Y extent.
-!
-! AUTO_LCHAR = 0:
-! Use manually specified LCHAR.
-
 AUTO_LCHAR      = 1
 LCHAR           = 0.05
-
-! Maximum surface temperature used to generate
-! the convection coefficient table.
 TS_MAX          = 2000.0
-
-! Number of temperature points
 NTAB            = 41
 
-
-! =====================================================================
-! 4. APPROXIMATE TIME-STEP DIAGNOSTICS
-! =====================================================================
-
-! These values are illustrative only.
-! They do not overwrite Engineering Data.
-!
-! Update with actual local mesh/material properties.
-
-LMIN_EST        = 0.001
-K_EST           = 10.0
-RHO_EST         = 1600.0
-CP_EST          = 800.0
-
-ALPHA_EST = K_EST/(RHO_EST*CP_EST)
-
-DTMIN_EST = LMIN_EST**2/(4.0*ALPHA_EST)
-
-
-! =====================================================================
-! 5. QUADRATIC THERMAL ELEMENT STABILIZATION
-! =====================================================================
-
-! Change supported quadratic thermal elements to use
-! diagonalized specific heat matrices.
-!
-! This may reduce thermal undershoot.
-! It does not impose a strict minimum temperature.
-
+! -------------------------- PREP7 ------------------------------------
 FINISH
 /PREP7
-
-ALLSEL,ALL
-
-*GET,NELEM_ALL,ELEM,0,COUNT
-*GET,MAXTYP,ETYP,0,NUM,MAX
-
-*DIM,SEENTYP,ARRAY,MAXTYP
-
-NDIAG = 0
-
-*GET,EID,ELEM,0,NUM,MIN
-
-*DO,IE,1,NELEM_ALL
-
-    *GET,TYPID,ELEM,EID,ATTR,TYPE
-
-    *IF,SEENTYP(TYPID),EQ,0,THEN
-
-        SEENTYP(TYPID) = 1
-
-        *GET,ENAME,ETYP,TYPID,ATTR,ENAM
-
-        ! SOLID291
-        *IF,ENAME,EQ,291,THEN
-
-            KEYOPT,TYPID,15,1
-
-            NDIAG = NDIAG+1
-
-        *ENDIF
-
-        ! SOLID279
-        *IF,ENAME,EQ,279,THEN
-
-            KEYOPT,TYPID,15,1
-
-            NDIAG = NDIAG+1
-
-        *ENDIF
-
-        ! Legacy SOLID87
-        *IF,ENAME,EQ,87,THEN
-
-            KEYOPT,TYPID,1,1
-
-            NDIAG = NDIAG+1
-
-        *ENDIF
-
-        ! Legacy SOLID90
-        *IF,ENAME,EQ,90,THEN
-
-            KEYOPT,TYPID,1,1
-
-            NDIAG = NDIAG+1
-
-        *ENDIF
-
-    *ENDIF
-
-    EID = ELNEXT(EID)
-
-*ENDDO
-
-ALLSEL,ALL
-
-
-! =====================================================================
-! 6. INITIAL TEMPERATURE
-! =====================================================================
-
-FINISH
-/SOLU
-
-ALLSEL,ALL
-
-! Initialize all drone nodes at 27 C.
-! These are initial values, not fixed temperatures.
-
-TUNIF,TINIT
-IC,ALL,TEMP,TINIT
-
-! Backward Euler thermal integration
-TINTP,,,,1.0
-
-
-! =====================================================================
-! 7. MATHEMATICAL CONSTANTS
-! =====================================================================
-
-*AFUN,RAD
-
-PI = ACOS(-1.0)
-
-OMEGA = ROT_DEG_S*PI/180.0
-
-PHI = PATTERN_YAW_DEG*PI/180.0
-
-CPHI = COS(PHI)
-SPHI = SIN(PHI)
-
-NTIME = NINT(TEND/DT)+1
-
-
-! =====================================================================
-! 8. INPUT VALIDATION
-! =====================================================================
-
-*IF,TEND,LE,0.0,THEN
-    *MSG,FATAL
-    ('TEND must be positive')
-*ENDIF
-
-*IF,DT,LE,0.0,THEN
-    *MSG,FATAL
-    ('DT must be positive')
-*ENDIF
-
-*IF,LASER_RAMP,LE,0.0,THEN
-    *MSG,FATAL
-    ('LASER_RAMP must be positive')
-*ENDIF
-
-*IF,SLANT,LE,0.0,THEN
-    *MSG,FATAL
-    ('SLANT must be positive')
-*ENDIF
-
-*IF,DH,LE,0.0,THEN
-    *MSG,FATAL
-    ('DH must be positive')
-*ENDIF
-
-*IF,DH,GT,SLANT,THEN
-    *MSG,FATAL
-    ('DH cannot exceed SLANT')
-*ENDIF
-
-*IF,ABSORB,LT,0.0,THEN
-    *MSG,FATAL
-    ('ABSORB must be between 0 and 1')
-*ENDIF
-
-*IF,ABSORB,GT,1.0,THEN
-    *MSG,FATAL
-    ('ABSORB must be between 0 and 1')
-*ENDIF
-
-
-! =====================================================================
-! 9. GAUSSIAN LASER PHYSICS
-! =====================================================================
-
-! Beam model:
-!
-! w0 = D/(pi*M2)
-!
-! w(z) = sqrt(w0^2 + (lambda*z)^2)
-!
-! P(z) = P0*exp(-alpha_atm*z)
-!
-! I(r) = 2*P(z)*cos(theta)/(pi*w(z)^2)
-!        *exp(-2*r^2/w(z)^2)
-
-HORIZ = SQRT(SLANT**2-DH**2)
-
-THETA = ATAN2(HORIZ,DH)
-
-COST = COS(THETA)
-
-! Clip incidence factor
-
-*IF,COST,LT,0.2,THEN
-    COST = 0.2
-*ENDIF
-
-*IF,COST,GT,1.0,THEN
-    COST = 1.0
-*ENDIF
-
-! Beam waist
-W0 = BEAM_D/(PI*M2FAC)
-
-! Beam width at target
-WBEAM = SQRT(W0**2+(LAM*SLANT)**2)
-
-! Atmospheric attenuation
-PTARGET = P0*EXP(-ALPHA_ATM*SLANT)
-
-! Peak absorbed irradiance
-QPEAK = ABSORB*2.0*PTARGET*COST/(PI*WBEAM**2)
-
-! Gaussian truncation radius
-RCUT = NCUT*WBEAM
-RCUT2 = RCUT**2
-
-
-! =====================================================================
-! 10. LASER PATH GEOMETRY
-! =====================================================================
-
 ALLSEL,ALL
 CSYS,0
 
+! Quadratic thermal elements: diagonalize specific-heat matrix.
+! This is a spatial discretization choice, NOT a temperature correction.
+! It can reduce nonphysical undershoot associated with consistent matrices.
+*GET,NELEM_ALL,ELEM,0,COUNT
+*GET,MAXTYP,ETYP,0,NUM,MAX
+*DIM,SEENTYP,ARRAY,MAXTYP
+*GET,EID,ELEM,0,NUM,MIN
+NDIAG = 0
+*DO,IE,1,NELEM_ALL
+    *GET,TYPID,ELEM,EID,ATTR,TYPE
+    *IF,SEENTYP(TYPID),EQ,0,THEN
+        SEENTYP(TYPID) = 1
+        *GET,ENAME,ETYP,TYPID,ATTR,ENAM
+        *IF,ENAME,EQ,291,THEN
+            KEYOPT,TYPID,15,1
+            NDIAG = NDIAG+1
+        *ENDIF
+        *IF,ENAME,EQ,279,THEN
+            KEYOPT,TYPID,15,1
+            NDIAG = NDIAG+1
+        *ENDIF
+    *ENDIF
+    EID = ELNEXT(EID)
+*ENDDO
+ALLSEL,ALL
+
+! ----------------- VERIFY NAMED SELECTIONS ---------------------------
 CMSEL,S,LASER_PATH,NODE
-
 *GET,NPATH,NODE,0,COUNT
-
-*IF,NPATH,LT,1,THEN
+*IF,NPATH,LT,4,THEN
     *MSG,FATAL
-    ('LASER_PATH contains no selected nodes')
+    LASER_PATH must contain exterior face nodes
 *ENDIF
-
-! Bounding box of the laser path
 
 *GET,XMINP,NODE,0,MNLOC,X
 *GET,XMAXP,NODE,0,MXLOC,X
-
 *GET,YMINP,NODE,0,MNLOC,Y
 *GET,YMAXP,NODE,0,MXLOC,Y
-
 *GET,ZMINP,NODE,0,MNLOC,Z
 *GET,ZMAXP,NODE,0,MXLOC,Z
-
-XCEN = (XMINP+XMAXP)/2.0
-YCEN = (YMINP+YMAXP)/2.0
-ZCEN = (ZMINP+ZMAXP)/2.0
-
+XCEN  = 0.5*(XMINP+XMAXP)
+YCEN  = 0.5*(YMINP+YMAXP)
+ZCEN  = 0.5*(ZMINP+ZMAXP)
 YBEAM = YCEN+LASER_Y_OFFSET
 
+ALLSEL,ALL
+CMSEL,S,EXPOSED_SURF,NODE
+*GET,NEXPOSED,NODE,0,COUNT
+*IF,NEXPOSED,LT,4,THEN
+    *MSG,FATAL
+    EXPOSED_SURF must contain exterior face nodes
+*ENDIF
+*GET,YMIN_EXP,NODE,0,MNLOC,Y
+*GET,YMAX_EXP,NODE,0,MXLOC,Y
+HEIGHT_EXP = YMAX_EXP-YMIN_EXP
+*IF,AUTO_LCHAR,EQ,1,THEN
+    LCHAR = HEIGHT_EXP
+*ENDIF
+*IF,LCHAR,LT,0.001,THEN
+    LCHAR = 0.05
+*ENDIF
+ALLSEL,ALL
 
-! =====================================================================
-! 11. ALLOCATE LASER ARRAYS
-! =====================================================================
+! ----------------- NATURAL CONVECTION h(T) ---------------------------
+! Churchill-Chu vertical plate correlation, using film temperature.
+! The correlation assumes global Y is vertical. The model remains
+! stationary; forced convection due to rotation is not included.
+!
+! Store h as HF versus film temperature for a new material number.
+*GET,MAXMAT,MAT,0,NUM,MAX
+*GET,MAXMATUSED,ELEM,0,MATM
+MAT_HF = MAXMAT+1
+*IF,MAXMATUSED,GE,MAT_HF,THEN
+    MAT_HF = MAXMATUSED+1
+*ENDIF
+HMIN_NAT = 1E30
+HMAX_NAT = 0.0
+
+*IF,USE_CONV,EQ,1,THEN
+    MPTEMP
+    *DO,I,1,NTAB
+        TSURF_C = TAMB+(I-1)*(TS_MAX-TAMB)/(NTAB-1)
+        TFILM_C = 0.5*(TSURF_C+TAMB)
+        TFILM_K = TFILM_C+273.15
+        DELTAT  = ABS(TSURF_C-TAMB)
+        RHO_AIR = PAMB/(RGAS*TFILM_K)
+        MU_AIR  = MU_REF*(TFILM_K/TREF_AIR)**1.5
+        MU_AIR  = MU_AIR*(TREF_AIR+SUTH)/(TFILM_K+SUTH)
+        K_AIR   = K_REF*(TFILM_K/TREF_AIR)**0.85
+        NU_AIR  = MU_AIR/RHO_AIR
+        ALPHA_AIR = K_AIR/(RHO_AIR*CPAIR)
+        PR_AIR  = MU_AIR*CPAIR/K_AIR
+        BETA_AIR = 1.0/TFILM_K
+        RA_AIR = GRAV*BETA_AIR*DELTAT*LCHAR**3
+        RA_AIR = RA_AIR/(NU_AIR*ALPHA_AIR)
+        CC_DEN = (1.0+(0.492/PR_AIR)**(9.0/16.0))**(8.0/27.0)
+        NU_BAR = (0.825+0.387*RA_AIR**(1.0/6.0)/CC_DEN)**2
+        HLOCAL = NU_BAR*K_AIR/LCHAR
+        MPTEMP,I,TFILM_C
+        MPDATA,HF,MAT_HF,I,HLOCAL
+        *IF,HLOCAL,LT,HMIN_NAT,THEN
+            HMIN_NAT = HLOCAL
+        *ENDIF
+        *IF,HLOCAL,GT,HMAX_NAT,THEN
+            HMAX_NAT = HLOCAL
+        *ENDIF
+    *ENDDO
+*ENDIF
+
+! ------------ SEPARATE CONVECTION SURFACE ELEMENTS ------------------
+! Do not apply CONV to the same SOLID291 face receiving HFLUX.
+! Instead generate SURF152 on EXPOSED_SURF and put CONV there.
+! ESURF detects complete faces among selected SOLID291 elements.
+*GET,MAXTYP2,ETYP,0,NUM,MAX
+*GET,MAXREAL,RCON,0,NUM,MAX
+ET_SURF = MAXTYP2+1
+RC_SURF = MAXREAL+1
+ET,ET_SURF,152
+KEYOPT,ET_SURF,4,0
+KEYOPT,ET_SURF,5,0
+KEYOPT,ET_SURF,8,2
+R,RC_SURF
+
+*IF,USE_CONV,EQ,1,THEN
+    ALLSEL,ALL
+    ESEL,S,ENAME,,291
+    CMSEL,S,EXPOSED_SURF,NODE
+    TYPE,ET_SURF
+    REAL,RC_SURF
+    MAT,MAT_HF
+    ESURF
+    ALLSEL,ALL
+    ESEL,S,TYPE,,ET_SURF
+    *GET,NSURF,ELEM,0,COUNT
+    *IF,NSURF,LT,1,THEN
+        *MSG,FATAL
+        No SURF152 elements generated on EXPOSED_SURF
+    *ENDIF
+    ! SFE convection: KVAL 1 = film coefficient; 2 = bulk temp.
+    SFE,ALL,1,CONV,1,-MAT_HF
+    SFE,ALL,1,CONV,2,TAMB
+*ENDIF
+ALLSEL,ALL
+
+! ------------------------- LASER MODEL -------------------------------
+! Preserves original supplied beam physics and geometric mapping.
+*AFUN,RAD
+PI = ACOS(-1.0)
+OMEGA = ROT_DEG_S*PI/180.0
+PHI   = PATTERN_YAW_DEG*PI/180.0
+CPHI  = COS(PHI)
+SPHI  = SIN(PHI)
+NTIME = NINT(TEND/DT)+1
+
+HORIZ = SQRT(SLANT**2-DH**2)
+THETA = ATAN2(HORIZ,DH)
+COST  = COS(THETA)
+*IF,COST,LT,0.2,THEN
+    COST = 0.2
+*ENDIF
+*IF,COST,GT,1.0,THEN
+    COST = 1.0
+*ENDIF
+W0      = BEAM_D/(PI*M2FAC)
+WBEAM   = SQRT(W0**2+(LAM*SLANT)**2)
+PTARGET = P0*EXP(-ALPHA_ATM*SLANT)
+QPEAK   = ABSORB*2.0*PTARGET*COST/(PI*WBEAM**2)
+RCUT    = NCUT*WBEAM
+RCUT2   = RCUT**2
 
 *DIM,YPATH,ARRAY,NPATH
-
 *DIM,RPATH,ARRAY,NPATH
-
 *DIM,APATH,ARRAY,NPATH
-
-! Heat-flux table:
-! First dimension = TIME
-! Second dimension = NODE
-
 *DIM,QPATH,TABLE,NTIME,NPATH,1,TIME,NODE
 
-
-! =====================================================================
-! 12. EXTRACT NODE POSITIONS
-! =====================================================================
-
+ALLSEL,ALL
+CMSEL,S,LASER_PATH,NODE
 *GET,NID,NODE,0,NUM,MIN
-
 *DO,J,1,NPATH
-
     *GET,XN,NODE,NID,LOC,X
     *GET,YN,NODE,NID,LOC,Y
     *GET,ZN,NODE,NID,LOC,Z
-
     DX = XN-XCEN
     DZ = ZN-ZCEN
-
     RLOC = SQRT(DX**2+DZ**2)
-
     YPATH(J) = YN
-
     RPATH(J) = RLOC
-
-    *IF,RLOC,GT,1.0E-12,THEN
-
+    *IF,RLOC,GT,1E-12,THEN
         APATH(J) = ATAN2(DZ,DX)
-
     *ELSE
-
         APATH(J) = 0.0
-
     *ENDIF
-
     QPATH(0,J) = NID
-
     NID = NDNEXT(NID)
-
 *ENDDO
-
-
-! =====================================================================
-! 13. MOVING GAUSSIAN LASER FOOTPRINT
-! =====================================================================
-
-! The drone mesh remains stationary.
-! The heat-flux footprint moves to approximate rotation.
-!
-! Rotation starts after ROT_DELAY seconds.
 
 QTABLEMAX = 0.0
-
 *DO,I,1,NTIME
-
     TCUR = (I-1)*DT
-
     *IF,I,EQ,NTIME,THEN
-
         TCUR = TEND
-
     *ENDIF
-
     QPATH(I,0) = TCUR
-
-    ! --------------------------------------------------------------
-    ! Laser power ramp
-    ! --------------------------------------------------------------
-
     RAMP = 0.0
-
     *IF,TCUR,GT,LASER_START,THEN
-
         RAMP = (TCUR-LASER_START)/LASER_RAMP
-
         *IF,RAMP,GT,1.0,THEN
-
             RAMP = 1.0
-
         *ENDIF
-
     *ENDIF
-
-    ! --------------------------------------------------------------
-    ! Rotation
-    ! --------------------------------------------------------------
-
     TROT = TCUR-ROT_DELAY
-
     *IF,TROT,LT,0.0,THEN
-
         TROT = 0.0
-
     *ENDIF
-
     THBEAM = OMEGA*TROT
-
-    ! --------------------------------------------------------------
-    ! Evaluate laser intensity at every LASER_PATH node
-    ! --------------------------------------------------------------
-
     *DO,J,1,NPATH
-
-        THNODE = APATH(J)
-
-        DTHETA = ATAN2(SIN(THNODE-THBEAM),COS(THNODE-THBEAM))
-
-        ! Unwrapped cylindrical coordinate approximation
+        DTHETA = ATAN2(SIN(APATH(J)-THBEAM),COS(APATH(J)-THBEAM))
         XLOCAL = RPATH(J)*DTHETA
-
         YLOCAL = YPATH(J)-YBEAM
-
-        ! Pattern rotation
         XROT = CPHI*XLOCAL+SPHI*YLOCAL
-
         YROT = -SPHI*XLOCAL+CPHI*YLOCAL
-
-        ! Beam inclination
         XR = XROT-XSHIFT
-
         YR = YROT/COST-YSHIFT
-
         R2 = XR**2+YR**2
-
         QLAS = 0.0
-
         *IF,USE_LASER,EQ,1,THEN
-
             *IF,RAMP,GT,0.0,THEN
-
                 *IF,R2,LE,RCUT2,THEN
-
                     QLAS = RAMP*QPEAK*EXP(-2.0*R2/WBEAM**2)
-
                 *ENDIF
-
             *ENDIF
-
         *ENDIF
-
         QPATH(I,J) = QLAS
-
         *IF,QLAS,GT,QTABLEMAX,THEN
-
             QTABLEMAX = QLAS
-
         *ENDIF
-
     *ENDDO
-
 *ENDDO
 
+! Do not silently solve a laser-on run if the tabulated load is zero.
+*IF,USE_LASER,EQ,1,THEN
+    *IF,QTABLEMAX,LE,0.0,THEN
+        *MSG,FATAL
+        Laser heat flux table has zero values everywhere
+    *ENDIF
+*ENDIF
 
-! =====================================================================
-! 14. APPLY LASER HEAT FLUX
-! =====================================================================
-
-! Delete existing nodal HFLUX and CONV surface loads.
-! Convection is applied later.
-!
-! Keep all elements selected to identify surface faces.
-
+! ----------------------- APPLY HEAT FLUX ----------------------------
+! Select only original SOLID291 elements, NOT SURF152 convection.
+! Face and midside nodes must all be in LASER_PATH.
 ALLSEL,ALL
-
-SFDELE,ALL,HFLUX
-SFDELE,ALL,CONV
-
-! Select laser path nodes
-
+ESEL,S,ENAME,,291
 CMSEL,S,LASER_PATH,NODE
-
-! Apply tabulated laser heat flux
-
 SF,ALL,HFLUX,%QPATH%
-
 ALLSEL,ALL
 
-
-! =====================================================================
-! 15. CHARACTERISTIC LENGTH FOR CONVECTION
-! =====================================================================
-
-HEIGHT_EXP = 0.0
-NALL_EXP = 0
-
-*IF,USE_CONV,EQ,1,THEN
-
-    ALLSEL,ALL
-
-    CSYS,0
-
-    CMSEL,S,EXPOSED_SURF,NODE
-
-    *GET,NALL_EXP,NODE,0,COUNT
-
-    *IF,NALL_EXP,LT,1,THEN
-
-        *MSG,FATAL
-        ('EXPOSED_SURF has no nodes')
-
-    *ENDIF
-
-    *GET,YMIN_EXP,NODE,0,MNLOC,Y
-
-    *GET,YMAX_EXP,NODE,0,MXLOC,Y
-
-    HEIGHT_EXP = YMAX_EXP-YMIN_EXP
-
-    *IF,AUTO_LCHAR,EQ,1,THEN
-
-        LCHAR = HEIGHT_EXP
-
-    *ENDIF
-
-    ALLSEL,ALL
-
-    ! Avoid invalid zero characteristic length
-
-    *IF,LCHAR,LT,0.001,THEN
-
-        LCHAR = 0.05
-
-        /COM, WARNING: Using fallback LCHAR = 0.05 m
-
-    *ENDIF
-
-*ENDIF
-
-
-! =====================================================================
-! 16. TEMPERATURE-DEPENDENT NATURAL CONVECTION
-! =====================================================================
-
-! Churchill-Chu vertical plate correlation:
-!
-! Ra = g*beta*abs(Ts-Tamb)*L^3/(nu*alpha)
-!
-! Nu = [0.825 +
-!       0.387*Ra^(1/6) /
-!       (1+(0.492/Pr)^(9/16))^(8/27)]^2
-!
-! h = Nu*k_air/L
-!
-! The coefficient is evaluated at average film temperature.
-!
-! Air property models:
-! Density: ideal gas
-! Viscosity: Sutherland
-! Conductivity: approximate power law
-! Specific heat: constant
-!
-! This is NATURAL convection only.
-! Rotational forced convection is not included.
-
-MAT_HF = 0
-HMIN_NAT = 0.0
-HMAX_NAT = 0.0
-NCONV = 0
-
-*IF,USE_CONV,EQ,1,THEN
-
-    ! --------------------------------------------------------------
-    ! Allocate a separate material number for HF property
-    ! --------------------------------------------------------------
-
-    *GET,MAXMAT,MAT,0,NUM,MAX
-
-    MAT_HF = MAXMAT+1
-
-    ! Reset current property-temperature table
-    MPTEMP
-
-    HMIN_NAT = 1.0E30
-
-    HMAX_NAT = 0.0
-
-    ! --------------------------------------------------------------
-    ! Calculate HF(T) table
-    ! --------------------------------------------------------------
-
-    *DO,I,1,NTAB
-
-        ! Sample surface temperature
-        TSURF_C = TAMB+(I-1)*(TS_MAX-TAMB)/(NTAB-1)
-
-        ! Film temperature
-        TFILM_C = (TSURF_C+TAMB)/2.0
-
-        TFILM_K = TFILM_C+273.15
-
-        ! Surface-to-air temperature difference
-        DELTAT = ABS(TSURF_C-TAMB)
-
-        ! ----------------------------------------------------------
-        ! Air density
-        ! ----------------------------------------------------------
-
-        RHO_AIR = PAMB/(RGAS*TFILM_K)
-
-        ! ----------------------------------------------------------
-        ! Dynamic viscosity - Sutherland's law
-        ! ----------------------------------------------------------
-
-        MU_AIR = MU_REF*(TFILM_K/TREF_AIR)**1.5
-
-        MU_AIR = MU_AIR*(TREF_AIR+SUTH)/(TFILM_K+SUTH)
-
-        ! ----------------------------------------------------------
-        ! Thermal conductivity of air
-        ! ----------------------------------------------------------
-
-        K_AIR = K_REF*(TFILM_K/TREF_AIR)**0.85
-
-        ! ----------------------------------------------------------
-        ! Kinematic viscosity
-        ! ----------------------------------------------------------
-
-        NU_AIR = MU_AIR/RHO_AIR
-
-        ! ----------------------------------------------------------
-        ! Thermal diffusivity
-        ! ----------------------------------------------------------
-
-        ALPHA_AIR = K_AIR/(RHO_AIR*CPAIR)
-
-        ! ----------------------------------------------------------
-        ! Prandtl number
-        ! ----------------------------------------------------------
-
-        PR_AIR = MU_AIR*CPAIR/K_AIR
-
-        ! ----------------------------------------------------------
-        ! Volumetric thermal expansion coefficient
-        ! ----------------------------------------------------------
-
-        BETA_AIR = 1.0/TFILM_K
-
-        ! ----------------------------------------------------------
-        ! Rayleigh number
-        ! ----------------------------------------------------------
-
-        RA_AIR = GRAV*BETA_AIR*DELTAT*LCHAR**3
-
-        RA_AIR = RA_AIR/(NU_AIR*ALPHA_AIR)
-
-        ! ----------------------------------------------------------
-        ! Churchill-Chu Nusselt number
-        ! ----------------------------------------------------------
-
-        CC_DEN = (1.0+(0.492/PR_AIR)**(9.0/16.0))**(8.0/27.0)
-
-        NU_BAR = (0.825+0.387*RA_AIR**(1.0/6.0)/CC_DEN)**2
-
-        ! ----------------------------------------------------------
-        ! Convective heat-transfer coefficient
-        ! ----------------------------------------------------------
-
-        HLOCAL = NU_BAR*K_AIR/LCHAR
-
-        ! ----------------------------------------------------------
-        ! Store HF property table in ANSYS
-        ! ----------------------------------------------------------
-
-        MPTEMP,I,TFILM_C
-
-        MPDATA,HF,MAT_HF,I,HLOCAL
-
-        ! ----------------------------------------------------------
-        ! Diagnostics
-        ! ----------------------------------------------------------
-
-        *IF,HLOCAL,LT,HMIN_NAT,THEN
-
-            HMIN_NAT = HLOCAL
-
-        *ENDIF
-
-        *IF,HLOCAL,GT,HMAX_NAT,THEN
-
-            HMAX_NAT = HLOCAL
-
-        *ENDIF
-
-    *ENDDO
-
-
-    ! ==============================================================
-    ! 17. APPLY TEMPERATURE-DEPENDENT CONVECTION
-    ! ==============================================================
-
-    ! Convection is applied only to exterior nodes
-    ! not included in LASER_PATH.
-    !
-    ! Complete exterior element faces are required.
-    ! This avoids assigning CONV and HFLUX to the
-    ! same underlying solid-element face.
-
-    ALLSEL,ALL
-
-    CMSEL,S,EXPOSED_SURF,NODE
-
-    ! Exclude laser path
-    CMSEL,U,LASER_PATH,NODE
-
-    *GET,NCONV,NODE,0,COUNT
-
-    ! Stop rather than silently run without convection.
-    *IF,NCONV,LT,1,THEN
-
-        *MSG,FATAL
-        ('No convection nodes remain outside LASER_PATH')
-
-    *ENDIF
-
-    ! Negative material reference tells ANSYS to use
-    ! temperature-dependent HF material property.
-
-    SF,ALL,CONV,-MAT_HF,TAMB
-
-    ALLSEL,ALL
-
-*ENDIF
-
-
-! =====================================================================
-! 18. RESULT STORAGE
-! =====================================================================
-
+! ----------------------- TRANSIENT SOLUTION -------------------------
+FINISH
+/SOLU
 ALLSEL,ALL
 
+! True initial condition: set only the t=0 temperature.
+! DO NOT use D,ALL,TEMP,27: that would fix temperature forever.
+! DO NOT reset, clamp, or correct temperatures after the solve.
+TUNIF,TINIT
+
+! Full transient thermal solver, allowing nonlinear h(T) iterations.
+! Backward Euler time integration + diagonalized heat capacity matrix.
+THOPT,FULL
+TINTP,,,,1.0
+AUTOTS,OFF
+DELTIM,DT,DT,DT
+TIME,TEND
 OUTRES,NSOL,ALL
-
 OUTRES,ESOL,ALL
 
-
-! =====================================================================
-! 19. LASER DIAGNOSTICS
-! =====================================================================
-
-/COM, ===========================================================
-/COM, ROTATING DRONE - STATIONARY LASER
-/COM, ===========================================================
-
-*VWRITE,TINIT,TEND,DT
-(' INITIAL TEMP / END TIME / TABLE DT = ',3E16.8)
-
-*VWRITE,ROT_DEG_S,ROT_DELAY
-(' ROTATION DEG/S / DELAY = ',2E16.8)
-
-*VWRITE,P0,ABSORB,PTARGET
-(' LASER POWER / ABSORPTIVITY / TARGET POWER = ',3E16.8)
-
-*VWRITE,W0,WBEAM,COST
-(' WAIST / BEAM WIDTH / INCIDENCE COS = ',3E16.8)
-
-*VWRITE,QPEAK,QTABLEMAX
-(' PEAK FLUX / TABLE MAX FLUX = ',2E16.8)
-
-*VWRITE,NPATH,XCEN,YCEN,ZCEN
-(' LASER NODES / CENTER XYZ = ',4E16.8)
-
-
-! =====================================================================
-! 20. CONVECTION DIAGNOSTICS
-! =====================================================================
-
-/COM, ===========================================================
-/COM, NATURAL CONVECTION
-/COM, ===========================================================
-
-*VWRITE,USE_CONV,TAMB,LCHAR
-(' CONV FLAG / AMBIENT TEMP / LCHAR = ',3E16.8)
-
-*VWRITE,NALL_EXP,NCONV
-(' EXPOSED / REMAINING CONVECTION NODES = ',2E16.8)
-
-*VWRITE,MAT_HF,NTAB
-(' HF MATERIAL / TABLE POINTS = ',2E16.8)
-
-*VWRITE,HMIN_NAT,HMAX_NAT
-(' MIN/MAX NATURAL CONVECTION COEFFICIENT = ',2E16.8)
-
-*VWRITE,HEIGHT_EXP
-(' EXPOSED SURFACE Y HEIGHT = ',E16.8)
-
-
-! =====================================================================
-! 21. MESH AND TIME-STEP DIAGNOSTICS
-! =====================================================================
-
-/COM, ===========================================================
-/COM, QUADRATIC THERMAL MESH
-/COM, ===========================================================
-
-*VWRITE,NELEM_ALL,NDIAG
-(' ELEMENT COUNT / MODIFIED ELEMENT TYPES = ',2E16.8)
-
-*VWRITE,LMIN_EST,K_EST,RHO_EST,CP_EST
-(' ASSUMED L/K/RHO/CP = ',4E16.8)
-
-*VWRITE,ALPHA_EST,DTMIN_EST
-(' ESTIMATED DIFFUSIVITY / DT LOWER BOUND = ',2E16.8)
-
-
-! =====================================================================
-! 22. FINAL NOTES
-! =====================================================================
-
-/COM, ===========================================================
-/COM, INITIAL DRONE TEMPERATURE: 27 C
-/COM, AMBIENT TEMPERATURE: 27 C
-/COM, GAUSSIAN LASER HEAT FLUX ENABLED IF USE_LASER=1
-/COM, QUADRATIC SPECIFIC HEAT STABILIZATION ATTEMPTED
-/COM, TEMPERATURE-DEPENDENT NATURAL CONVECTION ENABLED IF USE_CONV=1
-/COM, CONVECTION EXCLUDES LASER_PATH FACES
-/COM, RADIATION NOT ADDED BY THIS SCRIPT
-/COM, MESH IS STATIONARY; HEAT FLUX FOOTPRINT MOVES
-/COM, ===========================================================
-
+/COM, ============================================================
+/COM, DRONE HEATING - INITIAL 27 C, NO TEMPERATURE CLAMPING
+/COM, Convection is on SURF152, laser flux is on SOLID291.
+/COM, ============================================================
+*VWRITE,TINIT,TAMB,TEND,DT
+(' INIT, AMBIENT, END, DT: ',4E16.8)
+*VWRITE,NPATH,NEXPOSED,NDIAG
+(' LASER NODES, EXPOSED NODES, DIAG ETYPES: ',3E16.8)
+*VWRITE,PTARGET,QPEAK,QTABLEMAX
+(' TARGET POWER, PEAK FLUX, TABLE MAX: ',3E16.8)
+*VWRITE,LCHAR,HMIN_NAT,HMAX_NAT
+(' LCHAR, HMIN, HMAX: ',3E16.8)
 ALLSEL,ALL
-
-! =====================================================================
-! END OF APDL COMMANDS
-!
-! Do not add SOLVE.
-! Workbench executes the thermal solution.
+! Workbench will execute SOLVE after this Commands object.
 ! =====================================================================
